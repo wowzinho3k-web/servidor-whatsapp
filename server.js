@@ -1,6 +1,7 @@
 import http from "http";
 import fs from "fs";
 import crypto from "crypto";
+import puppeteer from "puppeteer";
 
 import makeWASocket, {
   DisconnectReason,
@@ -61,11 +62,10 @@ let conectado = false;
 
 
 // ======================================================
-// CONFIGURAÇÃO DO CAÇADOR DE OFERTAS
+// CONFIGURAÇÃO DO CAÇADOR ANTIGO
 // ======================================================
 
 const BUSCAS_MERCADO_LIVRE = [
-
   "furadeira",
   "parafusadeira",
   "chave jogo ferramentas",
@@ -107,20 +107,13 @@ const BUSCAS_MERCADO_LIVRE = [
   "organizador",
   "potes cozinha",
   "garrafa térmica"
-
 ];
 
 
-// Quantos resultados pegar de cada busca
 const LIMITE_POR_BUSCA = 10;
 
-
-// Desconto mínimo
 const DESCONTO_MINIMO = 10;
 
-
-// Preço máximo inicial.
-// Isso ajuda a evitar geladeira, móveis caros etc.
 const PRECO_MAXIMO = 3000;
 
 
@@ -149,18 +142,6 @@ function responderJSON(
       2
     )
   );
-
-}
-
-
-function escaparHTML(texto) {
-
-  return String(texto)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&#039;");
 
 }
 
@@ -209,6 +190,7 @@ function lerBodyJSON(req) {
               return;
 
             }
+
 
             resolve(
               JSON.parse(body)
@@ -278,6 +260,7 @@ function lerJSON(
       return null;
 
     }
+
 
     return JSON.parse(
       fs.readFileSync(
@@ -765,7 +748,7 @@ function formatarReais(valor) {
 
 
 // ======================================================
-// BUSCAR ITENS
+// BUSCAR ITENS - MÉTODO ANTIGO
 // ======================================================
 
 async function buscarProdutos(
@@ -833,7 +816,7 @@ async function buscarProdutos(
 
 
 // ======================================================
-// CONSULTAR PREÇOS DE UM ITEM
+// CONSULTAR PREÇOS
 // ======================================================
 
 async function consultarPrecos(
@@ -878,7 +861,7 @@ async function consultarPrecos(
 
 
 // ======================================================
-// EXTRAIR PREÇO NORMAL / PROMOCIONAL
+// ANALISAR PREÇOS
 // ======================================================
 
 function analisarPrecos(
@@ -939,6 +922,7 @@ function analisarPrecos(
 
 
   let original = null;
+
   let promocional = null;
 
 
@@ -1084,7 +1068,7 @@ Clique aqui
 
 
 // ======================================================
-// CAÇADOR DE OFERTAS
+// CAÇADOR ANTIGO
 // ======================================================
 
 async function cacarOfertasMercadoLivre(
@@ -1098,10 +1082,6 @@ async function cacarOfertasMercadoLivre(
   const mapa =
     new Map();
 
-
-  // ------------------------------------------
-  // BUSCA EM VÁRIOS TIPOS DE PRODUTO
-  // ------------------------------------------
 
   for (
     const termo of
@@ -1120,7 +1100,9 @@ async function cacarOfertasMercadoLivre(
     ) {
 
       if (!item?.id) {
+
         continue;
+
       }
 
 
@@ -1129,7 +1111,9 @@ async function cacarOfertasMercadoLivre(
           item.id
         )
       ) {
+
         continue;
+
       }
 
 
@@ -1138,7 +1122,9 @@ async function cacarOfertasMercadoLivre(
         Number(item.price) >
         PRECO_MAXIMO
       ) {
+
         continue;
+
       }
 
 
@@ -1195,10 +1181,6 @@ async function cacarOfertasMercadoLivre(
     [];
 
 
-  // ------------------------------------------
-  // VERIFICA PREÇO PROMOCIONAL
-  // ------------------------------------------
-
   for (
     const item of candidatos
   ) {
@@ -1218,7 +1200,9 @@ async function cacarOfertasMercadoLivre(
 
 
     if (!preco) {
+
       continue;
+
     }
 
 
@@ -1226,7 +1210,9 @@ async function cacarOfertasMercadoLivre(
       preco.promocional >
       PRECO_MAXIMO
     ) {
+
       continue;
+
     }
 
 
@@ -1234,7 +1220,9 @@ async function cacarOfertasMercadoLivre(
       preco.desconto <
       DESCONTO_MINIMO
     ) {
+
       continue;
+
     }
 
 
@@ -1277,8 +1265,6 @@ async function cacarOfertasMercadoLivre(
     });
 
 
-    // Evita consultar centenas
-    // de produtos desnecessariamente.
     if (
       ofertas.length >=
       quantidade * 4
@@ -1291,14 +1277,9 @@ async function cacarOfertasMercadoLivre(
   }
 
 
-  // ------------------------------------------
-  // RANKING
-  // ------------------------------------------
-
   ofertas.sort(
     (a, b) => {
 
-      // Primeiro desconto
       const diferencaDesconto =
         b.desconto -
         a.desconto;
@@ -1315,8 +1296,6 @@ async function cacarOfertasMercadoLivre(
       }
 
 
-      // Em descontos parecidos,
-      // prioriza quem já vendeu mais.
       return (
         b.vendidos -
         a.vendidos
@@ -1325,10 +1304,6 @@ async function cacarOfertasMercadoLivre(
     }
   );
 
-
-  // ------------------------------------------
-  // EVITAR REPETIR DEMAIS A MESMA BUSCA
-  // ------------------------------------------
 
   const selecionadas =
     [];
@@ -1460,6 +1435,113 @@ function formatarDestino(
 
 
 // ======================================================
+// TESTAR NAVEGADOR PUPPETEER
+// ======================================================
+
+async function testarNavegador() {
+
+  let browser = null;
+
+
+  try {
+
+    browser =
+      await puppeteer.launch({
+        headless: true,
+
+        args: [
+          "--no-sandbox",
+          "--disable-setuid-sandbox",
+          "--disable-dev-shm-usage",
+          "--disable-gpu"
+        ]
+      });
+
+
+    const page =
+      await browser.newPage();
+
+
+    await page.setViewport({
+      width: 1366,
+      height: 768
+    });
+
+
+    await page.setUserAgent(
+      "Mozilla/5.0 (X11; Linux x86_64) " +
+      "AppleWebKit/537.36 " +
+      "(KHTML, like Gecko) " +
+      "Chrome/124.0.0.0 Safari/537.36"
+    );
+
+
+    await page.goto(
+      "https://www.mercadolivre.com.br/",
+      {
+        waitUntil:
+          "domcontentloaded",
+
+        timeout:
+          60000
+      }
+    );
+
+
+    return {
+
+      sucesso:
+        true,
+
+      mensagem:
+        "Navegador funcionando no servidor.",
+
+      titulo:
+        await page.title(),
+
+      url:
+        page.url()
+
+    };
+
+  }
+
+  catch (erro) {
+
+    return {
+
+      sucesso:
+        false,
+
+      erro:
+        erro.message
+
+    };
+
+  }
+
+  finally {
+
+    if (browser) {
+
+      try {
+
+        await browser.close();
+
+      }
+
+      catch {
+
+      }
+
+    }
+
+  }
+
+}
+
+
+// ======================================================
 // SERVIDOR HTTP
 // ======================================================
 
@@ -1479,6 +1561,34 @@ const server =
 
       const caminho =
         url.pathname;
+
+
+      // ==================================================
+      // TESTE DO NAVEGADOR
+      // ==================================================
+
+      if (
+        req.method === "GET" &&
+        caminho ===
+          "/teste-navegador"
+      ) {
+
+        const resultado =
+          await testarNavegador();
+
+
+        responderJSON(
+          res,
+          resultado.sucesso
+            ? 200
+            : 500,
+          resultado
+        );
+
+
+        return;
+
+      }
 
 
       // ==================================================
@@ -1624,7 +1734,7 @@ const server =
 
 
       // ==================================================
-      // CALLBACK
+      // MERCADO LIVRE - CALLBACK
       // ==================================================
 
       if (
@@ -1691,13 +1801,15 @@ const server =
               text-align:center;
               padding:60px;
             ">
+
               <h1>
                 ✅ Mercado Livre conectado!
               </h1>
 
               <p>
-                Agora o servidor pode buscar ofertas.
+                Autorização concluída.
               </p>
+
             </body>
             `
           );
@@ -1710,8 +1822,13 @@ const server =
             res,
             500,
             {
-              sucesso: false,
-              erro: erro.message
+
+              sucesso:
+                false,
+
+              erro:
+                erro.message
+
             }
           );
 
@@ -1724,7 +1841,7 @@ const server =
 
 
       // ==================================================
-      // CAÇADOR DE OFERTAS
+      // CAÇADOR ANTIGO
       // ==================================================
 
       if (
@@ -1837,15 +1954,29 @@ const server =
               res,
               401,
               {
+
                 sucesso:
                   false,
 
                 erro:
                   "Chave inválida."
+
               }
             );
 
             return;
+
+          }
+
+
+          if (
+            !sock ||
+            !conectado
+          ) {
+
+            throw new Error(
+              "WhatsApp não está conectado."
+            );
 
           }
 
@@ -1898,11 +2029,13 @@ const server =
             res,
             500,
             {
+
               sucesso:
                 false,
 
               erro:
                 erro.message
+
             }
           );
 
@@ -1935,15 +2068,29 @@ const server =
               res,
               401,
               {
+
                 sucesso:
                   false,
 
                 erro:
                   "Chave inválida."
+
               }
             );
 
             return;
+
+          }
+
+
+          if (
+            !sock ||
+            !conectado
+          ) {
+
+            throw new Error(
+              "WhatsApp não está conectado."
+            );
 
           }
 
@@ -1965,10 +2112,12 @@ const server =
             await sock.sendMessage(
               jid,
               {
+
                 text:
                   String(
                     body.mensagem
                   )
+
               }
             );
 
@@ -1998,11 +2147,13 @@ const server =
             res,
             500,
             {
+
               sucesso:
                 false,
 
               erro:
                 erro.message
+
             }
           );
 
@@ -2015,7 +2166,7 @@ const server =
 
 
       // ==================================================
-      // PÁGINA SIMPLES
+      // PÁGINA INICIAL
       // ==================================================
 
       res.writeHead(
@@ -2043,9 +2194,23 @@ const server =
 
           <p>
             WhatsApp:
-            ${conectado
-              ? "✅ conectado"
-              : "❌ desconectado"}
+            ${
+              conectado
+                ? "✅ conectado"
+                : "❌ desconectado"
+            }
+          </p>
+
+          <p>
+            <a
+              href="/teste-navegador"
+              style="
+                color:#00ff99;
+                font-size:20px;
+              "
+            >
+              Testar navegador
+            </a>
           </p>
 
           <p>
@@ -2067,6 +2232,10 @@ const server =
     }
   );
 
+
+// ======================================================
+// INICIAR SERVIDOR
+// ======================================================
 
 server.listen(
   PORT,
