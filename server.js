@@ -1,2333 +1,1143 @@
-import http from "http";
-import fs from "fs";
-import crypto from "crypto";
-
-import puppeteer from "puppeteer-core";
-import chromium from "@sparticuz/chromium";
-
-import makeWASocket, {
-  DisconnectReason,
-  useMultiFileAuthState,
-  Browsers
-} from "@whiskeysockets/baileys";
-
-import pino from "pino";
-
-
-// ======================================================
-// CONFIGURAÇÕES
-// ======================================================
-
-const PORT = process.env.PORT || 3000;
-
-const AUTH_DIR = "/data/baileys-auth";
-
-const SEND_KEY =
-  process.env.SEND_KEY || "";
-
-const ML_CLIENT_ID =
-  process.env.ML_CLIENT_ID || "";
-
-const ML_CLIENT_SECRET =
-  process.env.ML_CLIENT_SECRET || "";
-
-const ML_REDIRECT_URI =
-  "https://noble-cedar-0445.de.deplexo.com/mercadolivre/callback";
-
-const ML_TOKEN_FILE =
-  "/data/mercadolivre-token.json";
-
-const ML_OAUTH_FILE =
-  "/data/mercadolivre-oauth.json";
-
-
-fs.mkdirSync(
-  AUTH_DIR,
-  {
-    recursive: true
-  }
-);
-
-
-// ======================================================
-// ESTADO DO WHATSAPP
-// ======================================================
-
-let sock = null;
-
-let status =
-  "Servidor iniciado.";
-
-let pairingCode = "";
-
-let conectado = false;
-
-
-// ======================================================
-// CONFIGURAÇÃO DO CAÇADOR ANTIGO
-// ======================================================
-
-const BUSCAS_MERCADO_LIVRE = [
-  "furadeira",
-  "parafusadeira",
-  "chave jogo ferramentas",
-  "ferramentas",
-  "lavadora alta pressão",
-
-  "air fryer",
-  "chaleira elétrica",
-  "liquidificador",
-  "cafeteira",
-  "panela elétrica",
-
-  "celular",
-  "smartphone",
-  "fone bluetooth",
-  "carregador celular",
-  "power bank",
-
-  "mouse gamer",
-  "teclado gamer",
-  "ssd",
-  "monitor",
-  "caixa de som bluetooth",
-
-  "pesca",
-  "rede pesca",
-  "kit pesca",
-
-  "aspirador",
-  "ventilador",
-  "extensão elétrica",
-  "luminária",
-  "câmera segurança",
-
-  "kit ferramentas automotivas",
-  "compressor portátil",
-  "multímetro",
-
-  "organizador",
-  "potes cozinha",
-  "garrafa térmica"
-];
-
-const LIMITE_POR_BUSCA = 10;
-
-const DESCONTO_MINIMO = 10;
-
-const PRECO_MAXIMO = 3000;
-
-
-// ======================================================
-// FUNÇÕES GERAIS
-// ======================================================
-
-function responderJSON(
-  res,
-  statusCode,
-  objeto
-) {
-
-  res.writeHead(
-    statusCode,
-    {
-      "Content-Type":
-        "application/json; charset=utf-8"
-    }
-  );
-
-  res.end(
-    JSON.stringify(
-      objeto,
-      null,
-      2
-    )
-  );
-
-}
-
-
-function chaveValida(req) {
-
-  const chaveRecebida =
-    req.headers["x-send-key"];
-
-  return (
-    SEND_KEY &&
-    chaveRecebida === SEND_KEY
-  );
-
-}
-
-
-function lerBodyJSON(req) {
-
-  return new Promise(
-    (resolve, reject) => {
-
-      let body = "";
-
-
-      req.on(
-        "data",
-        chunk => {
-
-          body +=
-            chunk.toString();
-
-        }
-      );
-
-
-      req.on(
-        "end",
-        () => {
-
-          try {
-
-            if (!body) {
-
-              resolve({});
-
-              return;
-
-            }
-
-
-            resolve(
-              JSON.parse(body)
-            );
-
-          }
-
-          catch {
-
-            reject(
-              new Error(
-                "JSON inválido."
-              )
-            );
-
-          }
-
-        }
-      );
-
-
-      req.on(
-        "error",
-        reject
-      );
-
-    }
-  );
-
-}
-
-
-// ======================================================
-// ARQUIVOS JSON
-// ======================================================
-
-function salvarJSON(
-  arquivo,
-  dados
-) {
-
-  fs.writeFileSync(
-    arquivo,
-    JSON.stringify(
-      dados,
-      null,
-      2
-    ),
-    "utf8"
-  );
-
-}
-
-
-function lerJSON(
-  arquivo
-) {
-
-  try {
-
-    if (
-      !fs.existsSync(
-        arquivo
-      )
-    ) {
-
-      return null;
-
-    }
-
-
-    return JSON.parse(
-      fs.readFileSync(
-        arquivo,
-        "utf8"
-      )
-    );
-
-  }
-
-  catch (erro) {
-
-    console.error(
-      "Erro ao ler JSON:",
-      erro
-    );
-
-    return null;
-
-  }
-
-}
-
-
-// ======================================================
-// WHATSAPP
-// ======================================================
-
-async function iniciarWhatsApp() {
-
-  const {
-    state,
-    saveCreds
-  } =
-    await useMultiFileAuthState(
-      AUTH_DIR
-    );
-
-
-  sock =
-    makeWASocket({
-
-      auth: state,
-
-      logger:
-        pino({
-          level: "silent"
-        }),
-
-      browser:
-        Browsers.ubuntu(
-          "Chrome"
-        ),
-
-      printQRInTerminal:
-        false,
-
-      syncFullHistory:
-        false,
-
-      markOnlineOnConnect:
-        false
-
+document.addEventListener('DOMContentLoaded', () => {
+  const btnBuscar = document.getElementById('btnBuscar');
+  const btnCopiar = document.getElementById('btnCopiar');
+  const statusDiv = document.getElementById('status');
+  const resultadoDiv = document.getElementById('resultado');
+
+  btnBuscar.addEventListener('click', async () => {
+    const inputQuant =
+      document.getElementById('quant') ||
+      document.getElementById('quantidade') ||
+      document.querySelector('input[type="number"]');
+
+    const quantidade = inputQuant
+      ? (parseInt(inputQuant.value, 10) || 10)
+      : 10;
+
+    statusDiv.innerText =
+      `Buscando ${quantidade} ofertas na ordem da página...`;
+
+    resultadoDiv.value = '';
+
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      currentWindow: true
     });
 
+    if (
+      !tab ||
+      !tab.url ||
+      !tab.url.includes('mercadolivre.com.br')
+    ) {
+      alert(
+        'Abra primeiro a página da Central de Afiliados do Mercado Livre!'
+      );
 
-  sock.ev.on(
-    "creds.update",
-    saveCreds
-  );
+      statusDiv.innerText =
+        'Abra a Central de Afiliados primeiro.';
 
+      return;
+    }
 
-  sock.ev.on(
-    "connection.update",
-    update => {
+    try {
+      const results =
+        await chrome.scripting.executeScript({
+          target: {
+            tabId: tab.id
+          },
 
-      const {
-        connection,
-        lastDisconnect
-      } = update;
+          func: extrairOfertasEmOrdem,
 
-
-      if (
-        connection === "open"
-      ) {
-
-        conectado = true;
-
-        pairingCode = "";
-
-        status =
-          "WhatsApp conectado.";
-
-        console.log(
-          "WhatsApp conectado."
-        );
-
-      }
-
+          args: [
+            quantidade
+          ]
+        });
 
       if (
-        connection === "close"
+        !results ||
+        !results[0] ||
+        !results[0].result
       ) {
+        statusDiv.innerText =
+          'Erro ao ler a página. Recarregue a página (F5).';
 
-        conectado = false;
-
-
-        const statusCode =
-          lastDisconnect
-            ?.error
-            ?.output
-            ?.statusCode;
-
-
-        console.log(
-          "WhatsApp desconectou:",
-          statusCode
-        );
-
-
-        const saiuDaConta =
-          statusCode ===
-          DisconnectReason.loggedOut;
-
-
-        if (!saiuDaConta) {
-
-          setTimeout(
-            () => {
-
-              iniciarWhatsApp()
-                .catch(
-                  console.error
-                );
-
-            },
-            5000
-          );
-
-        }
-
+        return;
       }
 
+      const ofertas =
+        results[0].result;
+
+      if (
+        ofertas.length === 0
+      ) {
+        statusDiv.innerText =
+          'Nenhum anúncio encontrado.';
+
+        return;
+      }
+
+      const listaMensagens =
+        ofertas.map(
+          item => {
+
+            let bloco =
+              `🔥 OFERTA MERCADO LIVRE 🔥\n\n`;
+
+            bloco +=
+              `📦 ${item.titulo}\n\n`;
+
+            if (
+              item.precoOriginalFormatado &&
+              item.precoOriginalNumerico >
+                item.precoNumerico
+            ) {
+              bloco +=
+                `❌ De: ~R$ ${item.precoOriginalFormatado}~\n`;
+            }
+
+            bloco +=
+              `💥 Por: R$ ${item.preco}\n\n`;
+
+            bloco +=
+              `Clique aqui\n`;
+
+            bloco +=
+              `👉 ${item.link}`;
+
+            return bloco;
+          }
+        ).join(
+          '\n\n-------------------------\n\n'
+        );
+
+      resultadoDiv.value =
+        listaMensagens;
+
+      statusDiv.innerText =
+        `✅ ${ofertas.length} ofertas prontas, na ordem da página.`;
+
+    } catch (err) {
+
+      console.error(err);
+
+      statusDiv.innerText =
+        'Erro de execução no navegador.';
+    }
+  });
+
+
+  btnCopiar.addEventListener(
+    'click',
+    () => {
+
+      const texto =
+        resultadoDiv.value;
+
+      if (
+        !texto.trim()
+      ) {
+        alert(
+          'Faça uma busca primeiro!'
+        );
+
+        return;
+      }
+
+      resultadoDiv.select();
+
+      resultadoDiv.setSelectionRange(
+        0,
+        99999
+      );
+
+      try {
+        document.execCommand(
+          'copy'
+        );
+
+        const textoOriginal =
+          btnCopiar.innerText;
+
+        btnCopiar.innerText =
+          '✅ Copiado com Sucesso!';
+
+        btnCopiar.style.backgroundColor =
+          '#059669';
+
+        setTimeout(
+          () => {
+
+            btnCopiar.innerText =
+              textoOriginal;
+
+            btnCopiar.style.backgroundColor =
+              '#10b981';
+
+          },
+          2000
+        );
+
+      } catch (err) {
+
+        alert(
+          'Selecione o texto e pressione Ctrl+C.'
+        );
+      }
     }
   );
+});
 
-}
-
-
-await iniciarWhatsApp();
 
 
 // ======================================================
-// MERCADO LIVRE - OAUTH
+// FUNÇÃO QUE RODA DENTRO DA PÁGINA DO MERCADO LIVRE
 // ======================================================
 
-function base64URL(buffer) {
-
-  return buffer
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
-
-}
-
-
-function criarPKCE() {
-
-  const codeVerifier =
-    base64URL(
-      crypto.randomBytes(
-        48
-      )
-    );
-
-
-  const hash =
-    crypto
-      .createHash("sha256")
-      .update(
-        codeVerifier
-      )
-      .digest();
-
-
-  const codeChallenge =
-    base64URL(hash);
-
-
-  return {
-    codeVerifier,
-    codeChallenge
-  };
-
-}
-
-
-async function trocarCodePorToken(
-  code,
-  codeVerifier
+async function extrairOfertasEmOrdem(
+  qtdDesejada
 ) {
 
-  const params =
-    new URLSearchParams();
-
-
-  params.set(
-    "grant_type",
-    "authorization_code"
-  );
-
-  params.set(
-    "client_id",
-    ML_CLIENT_ID
-  );
-
-  params.set(
-    "client_secret",
-    ML_CLIENT_SECRET
-  );
-
-  params.set(
-    "code",
-    code
-  );
-
-  params.set(
-    "redirect_uri",
-    ML_REDIRECT_URI
-  );
-
-
-  if (codeVerifier) {
-
-    params.set(
-      "code_verifier",
-      codeVerifier
-    );
-
-  }
-
-
-  const resposta =
-    await fetch(
-      "https://api.mercadolibre.com/oauth/token",
-      {
-        method: "POST",
-
-        headers: {
-          "Content-Type":
-            "application/x-www-form-urlencoded"
-        },
-
-        body: params
-      }
-    );
-
-
-  const dados =
-    await resposta.json();
-
-
-  if (!resposta.ok) {
-
-    throw new Error(
-      dados?.message ||
-      dados?.error ||
-      "Erro ao obter token."
-    );
-
-  }
-
-
-  const agora =
-    Date.now();
-
-
-  const token = {
-
-    ...dados,
-
-    criado_em:
-      agora,
-
-    expira_em:
-      agora +
-      (
-        Number(
-          dados.expires_in ||
-          0
-        ) *
-        1000
-      )
-
-  };
-
-
-  salvarJSON(
-    ML_TOKEN_FILE,
-    token
-  );
-
-
-  return token;
-
-}
-
-
-// ======================================================
-// RENOVAR TOKEN MERCADO LIVRE
-// ======================================================
-
-async function renovarTokenMercadoLivre() {
-
-  const tokenAtual =
-    lerJSON(
-      ML_TOKEN_FILE
-    );
-
-
-  if (
-    !tokenAtual?.refresh_token
-  ) {
-
-    throw new Error(
-      "Refresh token não encontrado."
-    );
-
-  }
-
-
-  const params =
-    new URLSearchParams();
-
-
-  params.set(
-    "grant_type",
-    "refresh_token"
-  );
-
-  params.set(
-    "client_id",
-    ML_CLIENT_ID
-  );
-
-  params.set(
-    "client_secret",
-    ML_CLIENT_SECRET
-  );
-
-  params.set(
-    "refresh_token",
-    tokenAtual.refresh_token
-  );
-
-
-  const resposta =
-    await fetch(
-      "https://api.mercadolibre.com/oauth/token",
-      {
-
-        method:
-          "POST",
-
-        headers: {
-
-          "Content-Type":
-            "application/x-www-form-urlencoded"
-
-        },
-
-        body:
-          params
-
-      }
-    );
-
-
-  const dados =
-    await resposta.json();
-
-
-  if (!resposta.ok) {
-
-    throw new Error(
-      dados?.message ||
-      "Erro ao renovar token."
-    );
-
-  }
-
-
-  const agora =
-    Date.now();
-
-
-  const token = {
-
-    ...dados,
-
-    criado_em:
-      agora,
-
-    expira_em:
-      agora +
-      (
-        Number(
-          dados.expires_in ||
-          0
-        ) *
-        1000
-      )
-
-  };
-
-
-  salvarJSON(
-    ML_TOKEN_FILE,
-    token
-  );
-
-
-  return token;
-
-}
-
-
-// ======================================================
-// OBTER TOKEN MERCADO LIVRE
-// ======================================================
-
-async function obterTokenMercadoLivre() {
-
-  let token =
-    lerJSON(
-      ML_TOKEN_FILE
-    );
-
-
-  if (
-    !token?.access_token
-  ) {
-
-    throw new Error(
-      "Mercado Livre não autorizado."
-    );
-
-  }
-
-
-  const margem =
-    5 *
-    60 *
-    1000;
-
-
-  if (
-    token.expira_em &&
-    Date.now() >=
-      (
-        token.expira_em -
-        margem
-      )
-  ) {
-
-    token =
-      await renovarTokenMercadoLivre();
-
-  }
-
-
-  return token.access_token;
-
-}
-
-
-// ======================================================
-// FORMATAÇÃO
-// ======================================================
-
-function formatarReais(valor) {
-
-  return Number(valor)
-    .toLocaleString(
-      "pt-BR",
-      {
-        style: "currency",
-        currency: "BRL"
-      }
-    );
-
-}
-
-
-// ======================================================
-// BUSCA ANTIGA DO MERCADO LIVRE
-// ======================================================
-
-async function buscarProdutos(
-  termo,
-  accessToken
-) {
-
-  const url =
-    new URL(
-      "https://api.mercadolibre.com/sites/MLB/search"
-    );
-
-
-  url.searchParams.set(
-    "q",
-    termo
-  );
-
-
-  url.searchParams.set(
-    "limit",
-    String(
-      LIMITE_POR_BUSCA
-    )
-  );
-
-
-  const resposta =
-    await fetch(
-      url,
-      {
-        headers: {
-
-          Authorization:
-            `Bearer ${accessToken}`
-
-        }
-      }
-    );
-
-
-  if (!resposta.ok) {
-
-    console.log(
-      "Falha ao buscar:",
-      termo,
-      resposta.status
-    );
-
-    return [];
-
-  }
-
-
-  const dados =
-    await resposta.json();
-
-
-  return (
-    dados.results ||
-    []
-  );
-
-}
-
-
-// ======================================================
-// CONSULTAR PREÇOS
-// ======================================================
-
-async function consultarPrecos(
-  itemId,
-  accessToken
-) {
-
-  try {
-
-    const resposta =
-      await fetch(
-        `https://api.mercadolibre.com/items/${itemId}/prices`,
-        {
-          headers: {
-
-            Authorization:
-              `Bearer ${accessToken}`
-
-          }
-        }
+  const esperar =
+    ms =>
+      new Promise(
+        resolve =>
+          setTimeout(
+            resolve,
+            ms
+          )
       );
 
 
-    if (!resposta.ok) {
+  const SELETOR_CARD =
+    'li.poly-card, li[class*="poly-card"]';
+
+
+  const TAG_AFILIADO =
+    'multiofertasro';
+
+
+  const produtos =
+    [];
+
+
+  const idsJaSalvos =
+    new Set();
+
+
+
+  // ======================================================
+  // CONVERTER VALOR BRASILEIRO
+  // ======================================================
+
+  function numeroBrasileiro(
+    texto
+  ) {
+
+    if (!texto) {
+      return 0;
+    }
+
+
+    const limpo =
+      String(texto)
+        .replace(
+          /[^0-9,.]/g,
+          ''
+        )
+        .trim();
+
+
+    if (!limpo) {
+      return 0;
+    }
+
+
+    const numero =
+      parseFloat(
+        limpo
+          .replace(
+            /\./g,
+            ''
+          )
+          .replace(
+            ',',
+            '.'
+          )
+      );
+
+
+    return Number.isFinite(
+      numero
+    )
+      ? numero
+      : 0;
+  }
+
+
+
+  // ======================================================
+  // GERAR LINK CURTO DE AFILIADO
+  // ======================================================
+
+  async function gerarLinkCurto(
+    itemId,
+    itemAddToList,
+    urlOrigem
+  ) {
+
+    try {
+
+      const resposta =
+        await fetch(
+          'https://www.mercadolivre.com.br/affiliate-program/api/v2/affiliates/createLink',
+          {
+            method:
+              'POST',
+
+            credentials:
+              'include',
+
+            headers: {
+              'Content-Type':
+                'application/json'
+            },
+
+            body:
+              JSON.stringify({
+                itemId:
+                  itemId,
+
+                type:
+                  'product',
+
+                extraCommission:
+                  'false',
+
+                itemAddToList:
+                  itemAddToList,
+
+                tag:
+                  TAG_AFILIADO,
+
+                urls: [
+                  urlOrigem
+                ]
+              })
+          }
+        );
+
+
+      if (
+        !resposta.ok
+      ) {
+        return null;
+      }
+
+
+      const dados =
+        await resposta.json();
+
+
+      if (
+        dados &&
+        Array.isArray(
+          dados.urls
+        ) &&
+        dados.urls[0] &&
+        dados.urls[0].short_url
+      ) {
+
+        return (
+          dados.urls[0].short_url
+        );
+      }
+
 
       return null;
 
+    } catch (e) {
+
+      return null;
     }
-
-
-    return await resposta.json();
-
   }
 
-  catch {
-
-    return null;
-
-  }
-
-}
 
 
-// ======================================================
-// ANALISAR PREÇOS
-// ======================================================
+  // ======================================================
+  // LER UM CARD
+  // ======================================================
 
-function analisarPrecos(
-  dadosPrecos,
-  fallbackPrice = null
-) {
-
-  if (
-    !dadosPrecos?.prices ||
-    !Array.isArray(
-      dadosPrecos.prices
-    )
+  function lerCard(
+    card
   ) {
 
     if (
-      fallbackPrice
+      !card ||
+      card.offsetParent === null
     ) {
-
-      return {
-
-        original:
-          fallbackPrice,
-
-        promocional:
-          fallbackPrice,
-
-        desconto:
-          0
-
-      };
-
+      return null;
     }
 
 
-    return null;
-
-  }
-
-
-  const precos =
-    dadosPrecos.prices;
-
-
-  const standard =
-    precos.find(
-      p =>
-        p.type ===
-        "standard"
-    );
+    if (
+      card.closest(
+        '[class*="carousel"], [class*="slider"], [class*="banner"]'
+      )
+    ) {
+      return null;
+    }
 
 
-  const promotion =
-    precos.find(
-      p =>
-        p.type ===
-        "promotion"
-    );
+    const rect =
+      card.getBoundingClientRect();
 
 
-  let original = null;
+    if (
+      rect.width <= 0 ||
+      rect.height <= 0
+    ) {
+      return null;
+    }
 
-  let promocional = null;
 
-
-  if (promotion) {
-
-    promocional =
-      Number(
-        promotion.amount
+    const linkEl =
+      card.querySelector(
+        'a.poly-component__title, a[class*="title"], a[href*="mercadolivre.com.br"]'
       );
 
 
     if (
-      promotion.regular_amount
+      !linkEl ||
+      !linkEl.href
     ) {
+      return null;
+    }
 
-      original =
-        Number(
-          promotion.regular_amount
+
+    let urlObj;
+
+
+    try {
+
+      urlObj =
+        new URL(
+          linkEl.href
         );
 
+    } catch (e) {
+
+      return null;
     }
 
-  }
 
-
-  if (
-    !original &&
-    standard
-  ) {
-
-    original =
-      Number(
-        standard.amount
+    const matchMLB =
+      urlObj.pathname.match(
+        /MLB-?\d+/i
       );
 
-  }
+
+    if (
+      !matchMLB
+    ) {
+      return null;
+    }
 
 
-  if (
-    !promocional &&
-    standard
-  ) {
+    const itemId =
+      matchMLB[0]
+        .toUpperCase()
+        .replace(
+          '-',
+          ''
+        );
 
-    promocional =
-      Number(
-        standard.amount
+
+    // ======================================================
+    // TÍTULO
+    // ======================================================
+
+    let titulo =
+      '';
+
+
+    const elTitulo =
+      card.querySelector(
+        '.poly-component__title, h2, h3, h4, [class*="title"], [class*="name"]'
       );
 
-  }
+
+    if (
+      elTitulo
+    ) {
+
+      const candidato =
+        elTitulo.innerText
+          .replace(
+            /\n/g,
+            ' '
+          )
+          .replace(
+            /\s+/g,
+            ' '
+          )
+          .trim();
 
 
-  if (
-    !original &&
-    fallbackPrice
-  ) {
+      if (
+        candidato &&
+        candidato.length > 8 &&
+        !candidato
+          .toLowerCase()
+          .includes(
+            'produtos selecionados'
+          )
+      ) {
 
-    original =
-      Number(
-        fallbackPrice
+        titulo =
+          candidato;
+      }
+    }
+
+
+    if (
+      !titulo
+    ) {
+
+      const candidatoLink =
+        linkEl.innerText
+          .replace(
+            /\n/g,
+            ' '
+          )
+          .replace(
+            /\s+/g,
+            ' '
+          )
+          .trim();
+
+
+      if (
+        candidatoLink.length > 8 &&
+        !candidatoLink
+          .toLowerCase()
+          .includes(
+            'produtos selecionados'
+          )
+      ) {
+
+        titulo =
+          candidatoLink;
+      }
+    }
+
+
+    if (
+      !titulo
+    ) {
+      return null;
+    }
+
+
+
+    // ======================================================
+    // PREÇO ANTIGO
+    // ======================================================
+
+    let precoOriginalFormatado =
+      null;
+
+
+    let precoOriginalNumerico =
+      0;
+
+
+    const elOriginal =
+      card.querySelector(
+        's, .poly-price__original, [class*="original"], [class*="strikethrough"], [class*="prev"]'
       );
 
-  }
+
+    if (
+      elOriginal
+    ) {
+
+      const textoOriginal =
+        elOriginal.innerText
+          .replace(
+            /[^0-9,.]/g,
+            ''
+          )
+          .trim();
 
 
-  if (
-    !promocional &&
-    fallbackPrice
-  ) {
+      const valorOriginal =
+        numeroBrasileiro(
+          textoOriginal
+        );
 
-    promocional =
-      Number(
-        fallbackPrice
+
+      if (
+        valorOriginal > 5
+      ) {
+
+        precoOriginalFormatado =
+          textoOriginal;
+
+
+        precoOriginalNumerico =
+          valorOriginal;
+      }
+    }
+
+
+
+    // ======================================================
+    // PREÇO ATUAL
+    // ======================================================
+
+    const blocosPreco =
+      Array.from(
+        card.querySelectorAll(
+          '.poly-price__current .andes-money-amount, .andes-money-amount'
+        )
       );
 
-  }
 
-
-  if (
-    !original ||
-    !promocional
-  ) {
-
-    return null;
-
-  }
-
-
-  let desconto = 0;
-
-
-  if (
-    original >
-    promocional
-  ) {
-
-    desconto =
-      (
-        (
-          original -
-          promocional
-        ) /
-        original
-      ) *
-      100;
-
-  }
-
-
-  return {
-
-    original,
-
-    promocional,
-
-    desconto
-
-  };
-
-}
-
-
-// ======================================================
-// MONTAR MENSAGEM
-// ======================================================
-
-function montarMensagemMercadoLivre(
-  oferta
-) {
-
-  return (
-`🔥 OFERTA MERCADO LIVRE 🔥
-
-📦 ${oferta.titulo}
-
-❌ De: ~${formatarReais(oferta.preco_original)}~
-💥 Por: ${formatarReais(oferta.preco_promocional)}
-
-Clique aqui
-👉 ${oferta.link}`
-  );
-
-}
-
-
-// ======================================================
-// CAÇADOR ANTIGO
-// ======================================================
-
-async function cacarOfertasMercadoLivre(
-  quantidade = 20
-) {
-
-  const accessToken =
-    await obterTokenMercadoLivre();
-
-
-  const mapa =
-    new Map();
-
-
-  for (
-    const termo of
-    BUSCAS_MERCADO_LIVRE
-  ) {
-
-    const itens =
-      await buscarProdutos(
-        termo,
-        accessToken
-      );
+    const candidatosPreco =
+      [];
 
 
     for (
-      const item of itens
+      const bloco of blocosPreco
     ) {
 
-      if (!item?.id) {
-
-        continue;
-
-      }
-
-
       if (
-        mapa.has(
-          item.id
+        bloco.closest('s') ||
+        bloco.closest(
+          '.poly-price__original'
+        ) ||
+        bloco.closest(
+          '[class*="original"]'
         )
       ) {
 
         continue;
-
       }
+
+
+      const texto =
+        bloco.innerText
+          .replace(
+            /\n/g,
+            ''
+          )
+          .replace(
+            /[^0-9,.]/g,
+            ''
+          )
+          .trim();
+
+
+      const valor =
+        numeroBrasileiro(
+          texto
+        );
 
 
       if (
-        item.price &&
-        Number(item.price) >
-        PRECO_MAXIMO
+        valor > 5
       ) {
 
-        continue;
-
+        candidatosPreco.push({
+          texto,
+          valor
+        });
       }
-
-
-      mapa.set(
-        item.id,
-        {
-
-          id:
-            item.id,
-
-          titulo:
-            item.title,
-
-          link:
-            item.permalink,
-
-          imagem:
-            item.thumbnail,
-
-          preco_busca:
-            item.price,
-
-          vendidos:
-            item.sold_quantity ||
-            0,
-
-          categoria:
-            item.category_id,
-
-          termo_origem:
-            termo
-
-        }
-      );
-
     }
 
-  }
+
+    if (
+      candidatosPreco.length === 0
+    ) {
+
+      return null;
+    }
 
 
-  const candidatos =
-    Array.from(
-      mapa.values()
-    );
-
-
-  console.log(
-    "Candidatos encontrados:",
-    candidatos.length
-  );
-
-
-  const ofertas =
-    [];
-
-
-  for (
-    const item of candidatos
-  ) {
-
-    const dadosPrecos =
-      await consultarPrecos(
-        item.id,
-        accessToken
+    let principal =
+      candidatosPreco.find(
+        c =>
+          c.valor !==
+          precoOriginalNumerico
       );
+
+
+    if (
+      !principal
+    ) {
+
+      principal =
+        candidatosPreco[0];
+    }
 
 
     const preco =
-      analisarPrecos(
-        dadosPrecos,
-        item.preco_busca
+      principal.texto;
+
+
+    const precoNumerico =
+      principal.valor;
+
+
+    if (
+      precoOriginalNumerico <=
+      precoNumerico
+    ) {
+
+      precoOriginalFormatado =
+        null;
+
+
+      precoOriginalNumerico =
+        0;
+    }
+
+
+
+    // ======================================================
+    // DADOS DO ANÚNCIO
+    // ======================================================
+
+    const inputId =
+      card.querySelector(
+        'input[name="id"]'
       );
 
 
-    if (!preco) {
-
-      continue;
-
-    }
-
-
-    if (
-      preco.promocional >
-      PRECO_MAXIMO
-    ) {
-
-      continue;
-
-    }
+    const itemAddToList =
+      inputId
+        ? inputId.value
+        : urlObj.searchParams.get(
+            'wid'
+          );
 
 
-    if (
-      preco.desconto <
-      DESCONTO_MINIMO
-    ) {
-
-      continue;
-
-    }
+    const urlOrigem =
+      urlObj.origin +
+      urlObj.pathname;
 
 
-    ofertas.push({
+    return {
 
-      id:
-        item.id,
+      itemId,
 
-      titulo:
-        item.titulo,
+      itemAddToList,
 
-      link:
-        item.link,
+      urlOrigem,
 
-      imagem:
-        item.imagem,
+      titulo,
 
-      categoria:
-        item.categoria,
+      preco,
 
-      termo_origem:
-        item.termo_origem,
+      precoNumerico,
 
-      vendidos:
-        item.vendidos,
+      precoOriginalFormatado,
 
-      preco_original:
-        preco.original,
+      precoOriginalNumerico,
 
-      preco_promocional:
-        preco.promocional,
+      top:
+        rect.top,
 
-      desconto:
-        Number(
-          preco.desconto.toFixed(
-            1
-          )
-        )
+      left:
+        rect.left
 
-    });
-
-
-    if (
-      ofertas.length >=
-      quantidade * 4
-    ) {
-
-      break;
-
-    }
-
+    };
   }
 
 
-  ofertas.sort(
-    (a, b) => {
 
-      const diferencaDesconto =
-        b.desconto -
-        a.desconto;
+  // ======================================================
+  // COMEÇAR SEMPRE DO TOPO
+  // ======================================================
+
+  window.scrollTo({
+    top:
+      0,
+
+    behavior:
+      'auto'
+  });
+
+
+  await esperar(
+    1500
+  );
+
+
+  let semNovos =
+    0;
+
+
+  let ciclos =
+    0;
+
+
+  const MAX_CICLOS =
+    80;
+
+
+
+  // ======================================================
+  // VARREDURA EM ORDEM REAL
+  // ======================================================
+
+  while (
+    produtos.length <
+      qtdDesejada &&
+    ciclos <
+      MAX_CICLOS &&
+    semNovos <
+      8
+  ) {
+
+    ciclos++;
+
+
+    const quantidadeAntes =
+      produtos.length;
+
+
+    const cards =
+      Array.from(
+        document.querySelectorAll(
+          SELETOR_CARD
+        )
+      );
+
+
+    const destaFaixa =
+      [];
+
+
+    for (
+      const card of cards
+    ) {
+
+      const dados =
+        lerCard(
+          card
+        );
 
 
       if (
-        Math.abs(
-          diferencaDesconto
-        ) > 2
+        !dados
       ) {
-
-        return diferencaDesconto;
-
+        continue;
       }
 
 
-      return (
-        b.vendidos -
-        a.vendidos
+      if (
+        idsJaSalvos.has(
+          dados.itemId
+        )
+      ) {
+        continue;
+      }
+
+
+      // Não deixa um anúncio muito abaixo
+      // entrar antes dos anúncios visíveis.
+
+      if (
+        dados.top >
+        window.innerHeight *
+          1.35
+      ) {
+        continue;
+      }
+
+
+      if (
+        dados.top <
+        -500
+      ) {
+        continue;
+      }
+
+
+      destaFaixa.push(
+        dados
+      );
+    }
+
+
+
+    // ======================================================
+    // ORDEM VISUAL
+    // TOPO -> BAIXO
+    // ESQUERDA -> DIREITA
+    // ======================================================
+
+    destaFaixa.sort(
+      (
+        a,
+        b
+      ) => {
+
+        if (
+          Math.abs(
+            a.top -
+            b.top
+          ) >
+          35
+        ) {
+
+          return (
+            a.top -
+            b.top
+          );
+        }
+
+
+        return (
+          a.left -
+          b.left
+        );
+      }
+    );
+
+
+
+    // ======================================================
+    // SALVAR NA ORDEM
+    // ======================================================
+
+    for (
+      const item of destaFaixa
+    ) {
+
+      if (
+        produtos.length >=
+        qtdDesejada
+      ) {
+        break;
+      }
+
+
+      if (
+        idsJaSalvos.has(
+          item.itemId
+        )
+      ) {
+        continue;
+      }
+
+
+      // Reserva o ID antes de gerar o link.
+      // Assim ele nunca troca de posição depois.
+
+      idsJaSalvos.add(
+        item.itemId
       );
 
-    }
-  );
 
+      let linkFinal =
+        await gerarLinkCurto(
+          item.itemId,
+          item.itemAddToList,
+          item.urlOrigem
+        );
 
-  const selecionadas =
-    [];
 
+      if (
+        !linkFinal
+      ) {
 
-  const contadorTermos =
-    new Map();
+        const extras =
+          [];
 
 
-  for (
-    const oferta of ofertas
-  ) {
+        if (
+          item.itemAddToList
+        ) {
 
-    const termo =
-      oferta.termo_origem;
+          extras.push(
+            `wid=${encodeURIComponent(
+              item.itemAddToList
+            )}`
+          );
+        }
 
 
-    const quantidadeTermo =
-      contadorTermos.get(
-        termo
-      ) || 0;
+        linkFinal =
+          item.urlOrigem;
 
 
-    if (
-      quantidadeTermo >= 2
-    ) {
+        if (
+          extras.length
+        ) {
 
-      continue;
+          linkFinal +=
+            `?${extras.join('&')}`;
+        }
+      }
 
-    }
 
+      produtos.push({
 
-    selecionadas.push(
-      oferta
-    );
+        ordem:
+          produtos.length + 1,
 
+        id:
+          item.itemId,
 
-    contadorTermos.set(
-      termo,
-      quantidadeTermo + 1
-    );
+        titulo:
+          item.titulo,
 
+        link:
+          linkFinal,
 
-    if (
-      selecionadas.length >=
-      quantidade
-    ) {
+        preco:
+          item.preco,
 
-      break;
+        precoNumerico:
+          item.precoNumerico,
 
-    }
+        precoOriginalFormatado:
+          item.precoOriginalFormatado,
 
-  }
-
-
-  return selecionadas.map(
-    oferta => ({
-
-      ...oferta,
-
-      mensagem:
-        montarMensagemMercadoLivre(
-          oferta
-        )
-
-    })
-  );
-
-}
-
-
-// ======================================================
-// DESTINO WHATSAPP
-// ======================================================
-
-function formatarDestino(
-  destino,
-  tipo
-) {
-
-  if (!destino) {
-
-    throw new Error(
-      "Destino não informado."
-    );
-
-  }
-
-
-  const valor =
-    String(destino)
-      .trim();
-
-
-  if (
-    tipo === "grupo"
-  ) {
-
-    if (
-      valor.endsWith(
-        "@g.us"
-      )
-    ) {
-
-      return valor;
-
-    }
-
-
-    throw new Error(
-      "ID de grupo inválido."
-    );
-
-  }
-
-
-  const numero =
-    valor.replace(
-      /\D/g,
-      ""
-    );
-
-
-  return (
-    `${numero}@s.whatsapp.net`
-  );
-
-}
-
-
-// ======================================================
-// TESTE DO NAVEGADOR
-// PUPPETEER CORE + SPARTICUZ CHROMIUM
-// ======================================================
-
-async function testarNavegador() {
-
-  let browser = null;
-
-
-  try {
-
-    console.log(
-      "Preparando Chromium..."
-    );
-
-
-    const executablePath =
-      await chromium.executablePath();
-
-
-    console.log(
-      "Executável Chromium:",
-      executablePath
-    );
-
-
-    browser =
-      await puppeteer.launch({
-
-        args:
-          chromium.args,
-
-        defaultViewport:
-          chromium.defaultViewport,
-
-        executablePath:
-          executablePath,
-
-        headless:
-          "shell"
+        precoOriginalNumerico:
+          item.precoOriginalNumerico
 
       });
 
 
-    const page =
-      await browser.newPage();
+      await esperar(
+        300
+      );
+    }
 
 
-    await page.setViewport({
-      width: 1366,
-      height: 768
+
+    // ======================================================
+    // VER SE ENCONTROU NOVOS
+    // ======================================================
+
+    if (
+      produtos.length ===
+      quantidadeAntes
+    ) {
+
+      semNovos++;
+
+    } else {
+
+      semNovos =
+        0;
+    }
+
+
+    if (
+      produtos.length >=
+      qtdDesejada
+    ) {
+
+      break;
+    }
+
+
+
+    // ======================================================
+    // ROLAR DEVAGAR
+    // ======================================================
+
+    const posicaoAntes =
+      window.scrollY;
+
+
+    const alturaAntes =
+      document.documentElement
+        .scrollHeight;
+
+
+    window.scrollBy({
+
+      top:
+        Math.max(
+          450,
+          Math.floor(
+            window.innerHeight *
+            0.72
+          )
+        ),
+
+      behavior:
+        'auto'
+
     });
 
 
-    await page.setUserAgent(
-      "Mozilla/5.0 (X11; Linux x86_64) " +
-      "AppleWebKit/537.36 " +
-      "(KHTML, like Gecko) " +
-      "Chrome/153.0.0.0 Safari/537.36"
+    await esperar(
+      1200
     );
 
 
-    await page.goto(
-      "https://www.mercadolivre.com.br/",
-      {
 
-        waitUntil:
-          "domcontentloaded",
+    const chegouNoFim =
 
-        timeout:
-          60000
+      window.scrollY +
+      window.innerHeight >=
 
-      }
-    );
+      document.documentElement
+        .scrollHeight -
+      150;
 
 
-    const titulo =
-      await page.title();
+
+    // Se chegou no fim,
+    // força a página a carregar mais.
+
+    if (
+      chegouNoFim
+    ) {
+
+      window.scrollTo({
+
+        top:
+          alturaAntes,
+
+        behavior:
+          'auto'
+
+      });
 
 
-    const urlFinal =
-      page.url();
-
-
-    return {
-
-      sucesso:
-        true,
-
-      mensagem:
-        "Navegador funcionando no servidor.",
-
-      titulo:
-        titulo,
-
-      url:
-        urlFinal,
-
-      executavel:
-        executablePath
-
-    };
-
-  }
-
-  catch (erro) {
-
-    console.error(
-      "Erro no navegador:",
-      erro
-    );
-
-
-    return {
-
-      sucesso:
-        false,
-
-      erro:
-        erro.message,
-
-      tipo:
-        erro.name || "Erro"
-
-    };
-
-  }
-
-  finally {
-
-    if (browser) {
-
-      try {
-
-        await browser.close();
-
-      }
-
-      catch {
-
-      }
-
+      await esperar(
+        1600
+      );
     }
 
+
+
+    if (
+      window.scrollY ===
+        posicaoAntes &&
+      chegouNoFim
+    ) {
+
+      semNovos++;
+    }
   }
 
+
+
+  // ======================================================
+  // RETORNO FINAL
+  // ======================================================
+
+  return produtos
+    .slice(
+      0,
+      qtdDesejada
+    );
 }
-
-
-// ======================================================
-// SERVIDOR HTTP
-// ======================================================
-
-const server =
-  http.createServer(
-    async (
-      req,
-      res
-    ) => {
-
-      const url =
-        new URL(
-          req.url,
-          `http://${req.headers.host}`
-        );
-
-
-      const caminho =
-        url.pathname;
-
-
-      // ==================================================
-      // TESTAR NAVEGADOR
-      // ==================================================
-
-      if (
-        req.method === "GET" &&
-        caminho ===
-          "/teste-navegador"
-      ) {
-
-        const resultado =
-          await testarNavegador();
-
-
-        responderJSON(
-          res,
-          resultado.sucesso
-            ? 200
-            : 500,
-          resultado
-        );
-
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // STATUS
-      // ==================================================
-
-      if (
-        req.method === "GET" &&
-        caminho ===
-          "/status"
-      ) {
-
-        const tokenML =
-          lerJSON(
-            ML_TOKEN_FILE
-          );
-
-
-        responderJSON(
-          res,
-          200,
-          {
-
-            servidor:
-              "online",
-
-            whatsapp:
-              conectado
-                ? "conectado"
-                : "desconectado",
-
-            mercado_livre:
-              tokenML?.access_token
-                ? "autorizado"
-                : "não autorizado",
-
-            navegador:
-              "rota /teste-navegador disponível"
-
-          }
-        );
-
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // MERCADO LIVRE LOGIN
-      // ==================================================
-
-      if (
-        req.method === "GET" &&
-        caminho ===
-          "/mercadolivre/login"
-      ) {
-
-        const state =
-          crypto
-            .randomBytes(
-              24
-            )
-            .toString(
-              "hex"
-            );
-
-
-        const {
-          codeVerifier,
-          codeChallenge
-        } =
-          criarPKCE();
-
-
-        salvarJSON(
-          ML_OAUTH_FILE,
-          {
-
-            state,
-
-            codeVerifier,
-
-            criado_em:
-              Date.now()
-
-          }
-        );
-
-
-        const autorizacao =
-          new URL(
-            "https://auth.mercadolivre.com.br/authorization"
-          );
-
-
-        autorizacao.searchParams.set(
-          "response_type",
-          "code"
-        );
-
-
-        autorizacao.searchParams.set(
-          "client_id",
-          ML_CLIENT_ID
-        );
-
-
-        autorizacao.searchParams.set(
-          "redirect_uri",
-          ML_REDIRECT_URI
-        );
-
-
-        autorizacao.searchParams.set(
-          "state",
-          state
-        );
-
-
-        autorizacao.searchParams.set(
-          "code_challenge",
-          codeChallenge
-        );
-
-
-        autorizacao.searchParams.set(
-          "code_challenge_method",
-          "S256"
-        );
-
-
-        res.writeHead(
-          302,
-          {
-            Location:
-              autorizacao.toString()
-          }
-        );
-
-
-        res.end();
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // CALLBACK MERCADO LIVRE
-      // ==================================================
-
-      if (
-        req.method === "GET" &&
-        caminho ===
-          "/mercadolivre/callback"
-      ) {
-
-        try {
-
-          const code =
-            url.searchParams.get(
-              "code"
-            );
-
-
-          const state =
-            url.searchParams.get(
-              "state"
-            );
-
-
-          const oauth =
-            lerJSON(
-              ML_OAUTH_FILE
-            );
-
-
-          if (
-            !code ||
-            !oauth ||
-            state !==
-              oauth.state
-          ) {
-
-            throw new Error(
-              "Falha na autorização."
-            );
-
-          }
-
-
-          await trocarCodePorToken(
-            code,
-            oauth.codeVerifier
-          );
-
-
-          res.writeHead(
-            200,
-            {
-              "Content-Type":
-                "text/html; charset=utf-8"
-            }
-          );
-
-
-          res.end(
-            `
-            <body style="
-              background:#111;
-              color:white;
-              font-family:Arial;
-              text-align:center;
-              padding:60px;
-            ">
-
-              <h1>
-                ✅ Mercado Livre conectado!
-              </h1>
-
-              <p>
-                Autorização concluída.
-              </p>
-
-            </body>
-            `
-          );
-
-        }
-
-        catch (erro) {
-
-          responderJSON(
-            res,
-            500,
-            {
-
-              sucesso:
-                false,
-
-              erro:
-                erro.message
-
-            }
-          );
-
-        }
-
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // OFERTAS MERCADO LIVRE - MÉTODO ANTIGO
-      // ==================================================
-
-      if (
-        req.method === "GET" &&
-        caminho ===
-          "/mercadolivre/ofertas"
-      ) {
-
-        try {
-
-          let quantidade =
-            Number(
-              url.searchParams.get(
-                "quantidade"
-              ) || 10
-            );
-
-
-          if (
-            quantidade < 1
-          ) {
-
-            quantidade = 1;
-
-          }
-
-
-          if (
-            quantidade > 50
-          ) {
-
-            quantidade = 50;
-
-          }
-
-
-          const ofertas =
-            await cacarOfertasMercadoLivre(
-              quantidade
-            );
-
-
-          responderJSON(
-            res,
-            200,
-            {
-
-              sucesso:
-                true,
-
-              total:
-                ofertas.length,
-
-              ofertas:
-                ofertas
-
-            }
-          );
-
-        }
-
-        catch (erro) {
-
-          console.error(
-            "Erro no caçador:",
-            erro
-          );
-
-
-          responderJSON(
-            res,
-            500,
-            {
-
-              sucesso:
-                false,
-
-              erro:
-                erro.message
-
-            }
-          );
-
-        }
-
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // GRUPOS WHATSAPP
-      // ==================================================
-
-      if (
-        req.method === "GET" &&
-        caminho ===
-          "/grupos"
-      ) {
-
-        try {
-
-          if (
-            !chaveValida(
-              req
-            )
-          ) {
-
-            responderJSON(
-              res,
-              401,
-              {
-
-                sucesso:
-                  false,
-
-                erro:
-                  "Chave inválida."
-
-              }
-            );
-
-            return;
-
-          }
-
-
-          if (
-            !sock ||
-            !conectado
-          ) {
-
-            throw new Error(
-              "WhatsApp não está conectado."
-            );
-
-          }
-
-
-          const grupos =
-            await sock
-              .groupFetchAllParticipating();
-
-
-          const lista =
-            Object.values(
-              grupos
-            ).map(
-              grupo => ({
-
-                nome:
-                  grupo.subject,
-
-                id:
-                  grupo.id,
-
-                participantes:
-                  grupo.participants
-                    ?.length ||
-                  0
-
-              })
-            );
-
-
-          responderJSON(
-            res,
-            200,
-            {
-
-              sucesso:
-                true,
-
-              grupos:
-                lista
-
-            }
-          );
-
-        }
-
-        catch (erro) {
-
-          responderJSON(
-            res,
-            500,
-            {
-
-              sucesso:
-                false,
-
-              erro:
-                erro.message
-
-            }
-          );
-
-        }
-
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // ENVIAR WHATSAPP
-      // ==================================================
-
-      if (
-        req.method === "POST" &&
-        caminho ===
-          "/send"
-      ) {
-
-        try {
-
-          if (
-            !chaveValida(
-              req
-            )
-          ) {
-
-            responderJSON(
-              res,
-              401,
-              {
-
-                sucesso:
-                  false,
-
-                erro:
-                  "Chave inválida."
-
-              }
-            );
-
-            return;
-
-          }
-
-
-          if (
-            !sock ||
-            !conectado
-          ) {
-
-            throw new Error(
-              "WhatsApp não está conectado."
-            );
-
-          }
-
-
-          const body =
-            await lerBodyJSON(
-              req
-            );
-
-
-          if (
-            !body.mensagem
-          ) {
-
-            throw new Error(
-              "Mensagem não informada."
-            );
-
-          }
-
-
-          const jid =
-            formatarDestino(
-              body.destino,
-              body.tipo
-            );
-
-
-          const resultado =
-            await sock.sendMessage(
-              jid,
-              {
-
-                text:
-                  String(
-                    body.mensagem
-                  )
-
-              }
-            );
-
-
-          responderJSON(
-            res,
-            200,
-            {
-
-              sucesso:
-                true,
-
-              id:
-                resultado
-                  ?.key
-                  ?.id ||
-                null
-
-            }
-          );
-
-        }
-
-        catch (erro) {
-
-          responderJSON(
-            res,
-            500,
-            {
-
-              sucesso:
-                false,
-
-              erro:
-                erro.message
-
-            }
-          );
-
-        }
-
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // PÁGINA INICIAL
-      // ==================================================
-
-      res.writeHead(
-        200,
-        {
-          "Content-Type":
-            "text/html; charset=utf-8"
-        }
-      );
-
-
-      res.end(
-        `
-        <body style="
-          background:#111;
-          color:white;
-          font-family:Arial;
-          text-align:center;
-          padding:50px;
-        ">
-
-          <h1>
-            Sistema de Ofertas
-          </h1>
-
-          <p>
-            WhatsApp:
-            ${
-              conectado
-                ? "✅ conectado"
-                : "❌ desconectado"
-            }
-          </p>
-
-          <p>
-            <a
-              href="/teste-navegador"
-              style="
-                color:#00ff99;
-                font-size:20px;
-              "
-            >
-              🌐 Testar navegador
-            </a>
-          </p>
-
-          <p>
-            <a
-              href="/status"
-              style="
-                color:#38bdf8;
-                font-size:20px;
-              "
-            >
-              📡 Ver status
-            </a>
-          </p>
-
-          <p>
-            <a
-              href="/mercadolivre/ofertas?quantidade=10"
-              style="
-                color:#ffe600;
-                font-size:20px;
-              "
-            >
-              Procurar 10 ofertas do Mercado Livre
-            </a>
-          </p>
-
-        </body>
-        `
-      );
-
-    }
-  );
-
-
-// ======================================================
-// INICIAR SERVIDOR
-// ======================================================
-
-server.listen(
-  PORT,
-  "0.0.0.0",
-  () => {
-
-    console.log(
-      `Servidor rodando na porta ${PORT}`
-    );
-
-  }
-);
