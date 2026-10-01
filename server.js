@@ -442,6 +442,13 @@ function normalizarOferta(
 
     link,
 
+    imagem:
+      oferta.imagem
+        ? String(
+            oferta.imagem
+          ).trim()
+        : null,
+
     preco:
       oferta.preco
         ? String(
@@ -3902,17 +3909,42 @@ const server =
             );
 
 
+          const imagem =
+            String(
+              body.imagem ||
+              ""
+            ).trim();
+
+
+          const conteudo =
+            imagem
+              ? {
+
+                  image: {
+                    url:
+                      imagem
+                  },
+
+                  caption:
+                    String(
+                      body.mensagem
+                    )
+
+                }
+              : {
+
+                  text:
+                    String(
+                      body.mensagem
+                    )
+
+                };
+
+
           const resultado =
             await sock.sendMessage(
               jid,
-              {
-
-                text:
-                  String(
-                    body.mensagem
-                  )
-
-              }
+              conteudo
             );
 
 
