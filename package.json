@@ -4,8 +4,7 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "postinstall": "PUPPETEER_CACHE_DIR=./.cache/puppeteer npx puppeteer browsers install chrome"
+    "start": "node server.js"
   },
   "engines": {
     "node": ">=20"
@@ -14,6 +13,7 @@
     "@whiskeysockets/baileys": "latest",
     "qrcode": "latest",
     "pino": "latest",
-    "puppeteer": "latest"
+    "puppeteer-core": "25.12.0",
+    "@sparticuz/chromium": "latest"
   }
 }
