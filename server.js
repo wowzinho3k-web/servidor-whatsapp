@@ -1,30 +1,49 @@
 import http from "http";
 import fs from "fs";
+
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
   Browsers
 } from "@whiskeysockets/baileys";
+
 import pino from "pino";
 
 const PORT = process.env.PORT || 3000;
 const AUTH_DIR = "/data/baileys-auth";
+const SEND_KEY = process.env.SEND_KEY || "";
 
 fs.mkdirSync(AUTH_DIR, { recursive: true });
 
 let sock = null;
 let status = "Servidor iniciado. Informe seu número para gerar o código.";
 let pairingCode = "";
+let conectado = false;
+
+
+// ======================================================
+// PÁGINA DE PAREAMENTO
+// ======================================================
 
 function pagina() {
+
   return `
     <!DOCTYPE html>
     <html lang="pt-BR">
+
       <head>
+
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1">
+
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1"
+        >
+
         <title>Conectar WhatsApp</title>
+
       </head>
+
 
       <body style="
         background:#111;
@@ -33,170 +52,867 @@ function pagina() {
         text-align:center;
         padding:40px;
       ">
+
         <h1>Conectar WhatsApp</h1>
 
         <p>${status}</p>
 
+
         ${
           pairingCode
+
             ? `
+
               <div style="
                 font-size:36px;
                 font-weight:bold;
                 letter-spacing:6px;
                 margin:30px;
               ">
+
                 ${pairingCode}
+
               </div>
 
+
               <p>
-                No celular: WhatsApp → Aparelhos conectados →
-                Conectar um aparelho → Conectar com número de telefone
+
+                No celular:
+
+                WhatsApp →
+
+                Aparelhos conectados →
+
+                Conectar um aparelho →
+
+                Conectar com número de telefone
+
               </p>
+
             `
+
             : `
-              <form method="POST" action="/pair">
+
+              <form
+                method="POST"
+                action="/pair"
+              >
+
                 <input
                   type="text"
                   name="phone"
                   placeholder="Ex.: 5569999999999"
+
                   style="
                     padding:12px;
                     font-size:18px;
                     width:260px;
                   "
+
                   required
                 >
 
                 <br><br>
 
+
                 <button
                   type="submit"
+
                   style="
                     padding:12px 25px;
                     font-size:18px;
                     cursor:pointer;
                   "
                 >
+
                   Gerar código
+
                 </button>
+
               </form>
 
+
               <p style="margin-top:25px;">
-                Digite somente números: 55 + DDD + número.
+
+                Digite somente números:
+
+                55 + DDD + número.
+
               </p>
+
             `
         }
+
+
+        <hr style="
+          margin-top:40px;
+          border-color:#333;
+        ">
+
+
+        <p>
+
+          Status do WhatsApp:
+
+          <strong>
+
+            ${
+              conectado
+                ? "Conectado"
+                : "Desconectado"
+            }
+
+          </strong>
+
+        </p>
+
       </body>
+
     </html>
   `;
 }
 
+
+// ======================================================
+// INICIAR WHATSAPP
+// ======================================================
+
 async function iniciarWhatsApp() {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+
+  const {
+    state,
+    saveCreds
+  } = await useMultiFileAuthState(
+    AUTH_DIR
+  );
+
 
   sock = makeWASocket({
+
     auth: state,
-    logger: pino({ level: "silent" }),
-    browser: Browsers.ubuntu("Chrome"),
+
+    logger:
+      pino({
+        level: "silent"
+      }),
+
+    browser:
+      Browsers.ubuntu(
+        "Chrome"
+      ),
+
     printQRInTerminal: false,
+
     syncFullHistory: false,
+
     markOnlineOnConnect: false
+
   });
 
-  sock.ev.on("creds.update", saveCreds);
 
-  sock.ev.on("connection.update", (update) => {
-    const { connection, lastDisconnect } = update;
+  sock.ev.on(
+    "creds.update",
+    saveCreds
+  );
 
-    if (connection === "open") {
-      pairingCode = "";
-      status = "WhatsApp conectado com sucesso!";
-      console.log("WhatsApp conectado.");
-    }
 
-    if (connection === "close") {
-      const statusCode =
-        lastDisconnect?.error?.output?.statusCode;
+  sock.ev.on(
+    "connection.update",
+    (update) => {
 
-      console.log("Conexão fechada. Código:", statusCode);
 
-      const saiuDaConta =
-        statusCode === DisconnectReason.loggedOut;
+      const {
+        connection,
+        lastDisconnect
+      } = update;
 
-      if (saiuDaConta) {
+
+      if (
+        connection === "open"
+      ) {
+
+        conectado = true;
+
         pairingCode = "";
-        status = "Sessão desconectada. Gere um novo código.";
-      } else {
-        pairingCode = "";
-        status = `Conexão caiu. Código: ${statusCode ?? "desconhecido"}`;
 
-        setTimeout(() => {
-          iniciarWhatsApp().catch(console.error);
-        }, 5000);
+        status =
+          "WhatsApp conectado com sucesso!";
+
+
+        console.log(
+          "WhatsApp conectado."
+        );
+
       }
+
+
+      if (
+        connection === "close"
+      ) {
+
+        conectado = false;
+
+
+        const statusCode =
+          lastDisconnect
+            ?.error
+            ?.output
+            ?.statusCode;
+
+
+        console.log(
+          "Conexão fechada. Código:",
+          statusCode
+        );
+
+
+        const saiuDaConta =
+
+          statusCode ===
+          DisconnectReason.loggedOut;
+
+
+        if (
+          saiuDaConta
+        ) {
+
+          pairingCode = "";
+
+          status =
+            "Sessão desconectada. Gere um novo código.";
+
+        }
+
+        else {
+
+          pairingCode = "";
+
+          status =
+            `Conexão caiu. Código: ${
+              statusCode ??
+              "desconhecido"
+            }`;
+
+
+          setTimeout(
+            () => {
+
+              iniciarWhatsApp()
+                .catch(
+                  console.error
+                );
+
+            },
+
+            5000
+          );
+
+        }
+
+      }
+
     }
-  });
+  );
+
 }
+
 
 await iniciarWhatsApp();
 
-const server = http.createServer((req, res) => {
-  if (req.method === "POST" && req.url === "/pair") {
-    let body = "";
 
-    req.on("data", chunk => {
-      body += chunk.toString();
-    });
+// ======================================================
+// FUNÇÕES AUXILIARES
+// ======================================================
 
-    req.on("end", async () => {
-      try {
-        const params = new URLSearchParams(body);
-        let phone = params.get("phone") || "";
+function responderJSON(
+  res,
+  statusCode,
+  objeto
+) {
 
-        phone = phone.replace(/\D/g, "");
+  res.writeHead(
+    statusCode,
+    {
+      "Content-Type":
+        "application/json; charset=utf-8"
+    }
+  );
 
-        if (phone.length < 10) {
-          status = "Número inválido. Use 55 + DDD + número.";
-          pairingCode = "";
 
-          res.writeHead(302, { Location: "/" });
-          res.end();
-          return;
+  res.end(
+    JSON.stringify(
+      objeto,
+      null,
+      2
+    )
+  );
+
+}
+
+
+function lerBodyJSON(req) {
+
+  return new Promise(
+    (resolve, reject) => {
+
+      let body = "";
+
+
+      req.on(
+        "data",
+        chunk => {
+
+          body +=
+            chunk.toString();
+
         }
+      );
 
-        status = "Gerando código de conexão...";
-        pairingCode = "";
 
-        const code = await sock.requestPairingCode(phone);
+      req.on(
+        "end",
+        () => {
 
-        pairingCode = code;
-        status = "Código gerado. Digite-o no WhatsApp.";
+          try {
 
-        res.writeHead(302, { Location: "/" });
-        res.end();
+            if (!body) {
 
-      } catch (erro) {
-        console.error("Erro ao gerar código:", erro);
+              resolve({});
 
-        pairingCode = "";
-        status = "Erro ao gerar o código. Tente novamente.";
+              return;
 
-        res.writeHead(302, { Location: "/" });
-        res.end();
-      }
-    });
+            }
 
-    return;
+
+            resolve(
+              JSON.parse(body)
+            );
+
+          }
+
+          catch (erro) {
+
+            reject(
+              new Error(
+                "JSON inválido."
+              )
+            );
+
+          }
+
+        }
+      );
+
+
+      req.on(
+        "error",
+        reject
+      );
+
+    }
+  );
+
+}
+
+
+// ======================================================
+// FORMATAR DESTINO
+// ======================================================
+
+function formatarDestino(
+  destino,
+  tipo
+) {
+
+  if (!destino) {
+
+    throw new Error(
+      "Destino não informado."
+    );
+
   }
 
-  res.writeHead(200, {
-    "Content-Type": "text/html; charset=utf-8"
-  });
 
-  res.end(pagina());
-});
+  const valor =
+    String(destino).trim();
 
-server.listen(PORT, "0.0.0.0", () => {
-  console.log(`Servidor rodando na porta ${PORT}`);
-});
+
+  // ------------------------------------------
+  // GRUPO
+  // ------------------------------------------
+
+  if (
+    tipo === "grupo"
+  ) {
+
+    if (
+      valor.endsWith(
+        "@g.us"
+      )
+    ) {
+
+      return valor;
+
+    }
+
+
+    throw new Error(
+      "Para grupo, informe o ID completo terminando em @g.us."
+    );
+
+  }
+
+
+  // ------------------------------------------
+  // NÚMERO NORMAL
+  // ------------------------------------------
+
+  const numero =
+    valor.replace(
+      /\D/g,
+      ""
+    );
+
+
+  if (
+    numero.length < 10
+  ) {
+
+    throw new Error(
+      "Número inválido."
+    );
+
+  }
+
+
+  return `${numero}@s.whatsapp.net`;
+
+}
+
+
+// ======================================================
+// SERVIDOR HTTP
+// ======================================================
+
+const server =
+  http.createServer(
+    async (req, res) => {
+
+
+      // ==================================================
+      // PAREAR WHATSAPP
+      // ==================================================
+
+      if (
+        req.method === "POST" &&
+        req.url === "/pair"
+      ) {
+
+        let body = "";
+
+
+        req.on(
+          "data",
+          chunk => {
+
+            body +=
+              chunk.toString();
+
+          }
+        );
+
+
+        req.on(
+          "end",
+          async () => {
+
+            try {
+
+              const params =
+                new URLSearchParams(
+                  body
+                );
+
+
+              let phone =
+                params.get("phone") ||
+                "";
+
+
+              phone =
+                phone.replace(
+                  /\D/g,
+                  ""
+                );
+
+
+              if (
+                phone.length < 10
+              ) {
+
+                status =
+                  "Número inválido. Use 55 + DDD + número.";
+
+                pairingCode = "";
+
+
+                res.writeHead(
+                  302,
+                  {
+                    Location: "/"
+                  }
+                );
+
+
+                res.end();
+
+                return;
+
+              }
+
+
+              status =
+                "Gerando código de conexão...";
+
+              pairingCode = "";
+
+
+              const code =
+                await sock.requestPairingCode(
+                  phone
+                );
+
+
+              pairingCode =
+                code;
+
+
+              status =
+                "Código gerado. Digite-o no WhatsApp.";
+
+
+              res.writeHead(
+                302,
+                {
+                  Location: "/"
+                }
+              );
+
+
+              res.end();
+
+            }
+
+            catch (erro) {
+
+              console.error(
+                "Erro ao gerar código:",
+                erro
+              );
+
+
+              pairingCode = "";
+
+
+              status =
+                "Erro ao gerar o código. Tente novamente.";
+
+
+              res.writeHead(
+                302,
+                {
+                  Location: "/"
+                }
+              );
+
+
+              res.end();
+
+            }
+
+          }
+        );
+
+
+        return;
+
+      }
+
+
+      // ==================================================
+      // ROTA SEGURA DE ENVIO
+      // ==================================================
+
+      if (
+        req.method === "POST" &&
+        req.url === "/send"
+      ) {
+
+        try {
+
+
+          // ------------------------------------------
+          // VERIFICA A SEND_KEY
+          // ------------------------------------------
+
+          const chaveRecebida =
+            req.headers[
+              "x-send-key"
+            ];
+
+
+          if (
+            !SEND_KEY
+          ) {
+
+            responderJSON(
+              res,
+              500,
+              {
+                sucesso: false,
+                erro:
+                  "SEND_KEY não configurada no servidor."
+              }
+            );
+
+            return;
+
+          }
+
+
+          if (
+            chaveRecebida !==
+            SEND_KEY
+          ) {
+
+            responderJSON(
+              res,
+              401,
+              {
+                sucesso: false,
+                erro:
+                  "Chave de envio inválida."
+              }
+            );
+
+            return;
+
+          }
+
+
+          // ------------------------------------------
+          // CONFERE WHATSAPP
+          // ------------------------------------------
+
+          if (
+            !sock ||
+            !conectado
+          ) {
+
+            responderJSON(
+              res,
+              503,
+              {
+                sucesso: false,
+                erro:
+                  "WhatsApp ainda não está conectado."
+              }
+            );
+
+            return;
+
+          }
+
+
+          // ------------------------------------------
+          // LÊ JSON
+          // ------------------------------------------
+
+          const body =
+            await lerBodyJSON(
+              req
+            );
+
+
+          const {
+            destino,
+            mensagem,
+            tipo = "numero"
+          } = body;
+
+
+          if (
+            !mensagem ||
+            !String(
+              mensagem
+            ).trim()
+          ) {
+
+            responderJSON(
+              res,
+              400,
+              {
+                sucesso: false,
+                erro:
+                  "Mensagem vazia."
+              }
+            );
+
+            return;
+
+          }
+
+
+          // ------------------------------------------
+          // MONTA JID
+          // ------------------------------------------
+
+          const jid =
+            formatarDestino(
+              destino,
+              tipo
+            );
+
+
+          // ------------------------------------------
+          // ENVIA
+          // ------------------------------------------
+
+          const resultado =
+            await sock.sendMessage(
+              jid,
+              {
+                text:
+                  String(
+                    mensagem
+                  )
+              }
+            );
+
+
+          console.log(
+            "Mensagem enviada para:",
+            jid
+          );
+
+
+          responderJSON(
+            res,
+            200,
+            {
+
+              sucesso: true,
+
+              destino:
+                jid,
+
+              mensagem:
+                "Mensagem enviada com sucesso.",
+
+              id:
+                resultado
+                  ?.key
+                  ?.id ||
+                null
+
+            }
+          );
+
+        }
+
+        catch (erro) {
+
+          console.error(
+            "Erro no /send:",
+            erro
+          );
+
+
+          responderJSON(
+            res,
+            500,
+            {
+
+              sucesso: false,
+
+              erro:
+                erro.message
+
+            }
+          );
+
+        }
+
+
+        return;
+
+      }
+
+
+      // ==================================================
+      // STATUS EM JSON
+      // ==================================================
+
+      if (
+        req.method === "GET" &&
+        req.url === "/status"
+      ) {
+
+        responderJSON(
+          res,
+          200,
+          {
+
+            servidor:
+              "online",
+
+            whatsapp:
+              conectado
+                ? "conectado"
+                : "desconectado"
+
+          }
+        );
+
+
+        return;
+
+      }
+
+
+      // ==================================================
+      // PÁGINA PRINCIPAL
+      // ==================================================
+
+      res.writeHead(
+        200,
+        {
+          "Content-Type":
+            "text/html; charset=utf-8"
+        }
+      );
+
+
+      res.end(
+        pagina()
+      );
+
+    }
+  );
+
+
+// ======================================================
+// INICIAR SERVIDOR
+// ======================================================
+
+server.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+
+    console.log(
+      `Servidor rodando na porta ${PORT}`
+    );
+
+  }
+);
