@@ -53,11 +53,75 @@ fs.mkdirSync(
 let sock = null;
 
 let status =
-  "Servidor iniciado. Informe seu número para gerar o código.";
+  "Servidor iniciado.";
 
 let pairingCode = "";
 
 let conectado = false;
+
+
+// ======================================================
+// CONFIGURAÇÃO DO CAÇADOR DE OFERTAS
+// ======================================================
+
+const BUSCAS_MERCADO_LIVRE = [
+
+  "furadeira",
+  "parafusadeira",
+  "chave jogo ferramentas",
+  "ferramentas",
+  "lavadora alta pressão",
+
+  "air fryer",
+  "chaleira elétrica",
+  "liquidificador",
+  "cafeteira",
+  "panela elétrica",
+
+  "celular",
+  "smartphone",
+  "fone bluetooth",
+  "carregador celular",
+  "power bank",
+
+  "mouse gamer",
+  "teclado gamer",
+  "ssd",
+  "monitor",
+  "caixa de som bluetooth",
+
+  "pesca",
+  "rede pesca",
+  "kit pesca",
+
+  "aspirador",
+  "ventilador",
+  "extensão elétrica",
+  "luminária",
+  "câmera segurança",
+
+  "kit ferramentas automotivas",
+  "compressor portátil",
+  "multímetro",
+
+  "organizador",
+  "potes cozinha",
+  "garrafa térmica"
+
+];
+
+
+// Quantos resultados pegar de cada busca
+const LIMITE_POR_BUSCA = 10;
+
+
+// Desconto mínimo
+const DESCONTO_MINIMO = 10;
+
+
+// Preço máximo inicial.
+// Isso ajuda a evitar geladeira, móveis caros etc.
+const PRECO_MAXIMO = 3000;
 
 
 // ======================================================
@@ -106,11 +170,10 @@ function chaveValida(req) {
   const chaveRecebida =
     req.headers["x-send-key"];
 
-  if (!SEND_KEY) {
-    return false;
-  }
-
-  return chaveRecebida === SEND_KEY;
+  return (
+    SEND_KEY &&
+    chaveRecebida === SEND_KEY
+  );
 
 }
 
@@ -131,6 +194,7 @@ function lerBodyJSON(req) {
 
         }
       );
+
 
       req.on(
         "end",
@@ -165,6 +229,7 @@ function lerBodyJSON(req) {
         }
       );
 
+
       req.on(
         "error",
         reject
@@ -177,7 +242,7 @@ function lerBodyJSON(req) {
 
 
 // ======================================================
-// SALVAR / LER JSON
+// ARQUIVOS JSON
 // ======================================================
 
 function salvarJSON(
@@ -226,240 +291,13 @@ function lerJSON(
   catch (erro) {
 
     console.error(
-      "Erro ao ler arquivo:",
-      arquivo,
+      "Erro ao ler JSON:",
       erro
     );
 
     return null;
 
   }
-
-}
-
-
-// ======================================================
-// PÁGINA PRINCIPAL
-// ======================================================
-
-function pagina() {
-
-  const mlToken =
-    lerJSON(
-      ML_TOKEN_FILE
-    );
-
-  const mercadoLivreConectado =
-    Boolean(
-      mlToken?.access_token
-    );
-
-
-  return `
-    <!DOCTYPE html>
-
-    <html lang="pt-BR">
-
-      <head>
-
-        <meta charset="UTF-8">
-
-        <meta
-          name="viewport"
-          content="width=device-width, initial-scale=1"
-        >
-
-        <title>Servidor de Ofertas</title>
-
-      </head>
-
-
-      <body style="
-        background:#111;
-        color:white;
-        font-family:Arial,sans-serif;
-        text-align:center;
-        padding:40px;
-        line-height:1.5;
-      ">
-
-        <h1>Servidor de Ofertas</h1>
-
-
-        <div style="
-          max-width:650px;
-          margin:auto;
-          background:#1c1c1c;
-          padding:25px;
-          border-radius:12px;
-          margin-bottom:20px;
-        ">
-
-          <h2>WhatsApp</h2>
-
-          <p>
-            Status:
-            <strong>
-              ${
-                conectado
-                  ? "✅ Conectado"
-                  : "❌ Desconectado"
-              }
-            </strong>
-          </p>
-
-
-          ${
-            pairingCode
-
-              ? `
-
-                <div style="
-                  font-size:36px;
-                  font-weight:bold;
-                  letter-spacing:6px;
-                  margin:30px;
-                ">
-                  ${escaparHTML(pairingCode)}
-                </div>
-
-                <p>
-                  No celular:
-                  WhatsApp →
-                  Aparelhos conectados →
-                  Conectar um aparelho →
-                  Conectar com número de telefone
-                </p>
-
-              `
-
-              : `
-
-                ${
-                  conectado
-
-                    ? `
-                      <p>
-                        WhatsApp pronto para enviar mensagens.
-                      </p>
-                    `
-
-                    : `
-
-                      <form
-                        method="POST"
-                        action="/pair"
-                      >
-
-                        <input
-                          type="text"
-                          name="phone"
-                          placeholder="Ex.: 5569999999999"
-                          style="
-                            padding:12px;
-                            font-size:18px;
-                            width:260px;
-                          "
-                          required
-                        >
-
-                        <br><br>
-
-                        <button
-                          type="submit"
-                          style="
-                            padding:12px 25px;
-                            font-size:18px;
-                            cursor:pointer;
-                          "
-                        >
-                          Gerar código
-                        </button>
-
-                      </form>
-
-                    `
-                }
-
-              `
-          }
-
-        </div>
-
-
-        <div style="
-          max-width:650px;
-          margin:auto;
-          background:#1c1c1c;
-          padding:25px;
-          border-radius:12px;
-        ">
-
-          <h2>Mercado Livre</h2>
-
-          <p>
-            Status:
-            <strong>
-              ${
-                mercadoLivreConectado
-                  ? "✅ Autorizado"
-                  : "❌ Ainda não autorizado"
-              }
-            </strong>
-          </p>
-
-
-          ${
-            mercadoLivreConectado
-
-              ? `
-
-                <p>
-                  Mercado Livre conectado ao servidor.
-                </p>
-
-                <p>
-                  <a
-                    href="/mercadolivre/teste"
-                    style="
-                      color:#ffe600;
-                      font-size:18px;
-                    "
-                  >
-                    Testar conexão com Mercado Livre
-                  </a>
-                </p>
-
-              `
-
-              : `
-
-                <p>
-                  <a
-                    href="/mercadolivre/login"
-                    style="
-                      display:inline-block;
-                      background:#ffe600;
-                      color:#222;
-                      padding:12px 22px;
-                      border-radius:8px;
-                      text-decoration:none;
-                      font-weight:bold;
-                    "
-                  >
-                    Conectar Mercado Livre
-                  </a>
-                </p>
-
-              `
-          }
-
-        </div>
-
-      </body>
-
-    </html>
-  `;
 
 }
 
@@ -482,13 +320,11 @@ async function iniciarWhatsApp() {
   sock =
     makeWASocket({
 
-      auth:
-        state,
+      auth: state,
 
       logger:
         pino({
-          level:
-            "silent"
+          level: "silent"
         }),
 
       browser:
@@ -528,14 +364,12 @@ async function iniciarWhatsApp() {
         connection === "open"
       ) {
 
-        conectado =
-          true;
+        conectado = true;
 
-        pairingCode =
-          "";
+        pairingCode = "";
 
         status =
-          "WhatsApp conectado com sucesso!";
+          "WhatsApp conectado.";
 
         console.log(
           "WhatsApp conectado."
@@ -548,8 +382,7 @@ async function iniciarWhatsApp() {
         connection === "close"
       ) {
 
-        conectado =
-          false;
+        conectado = false;
 
         const statusCode =
           lastDisconnect
@@ -559,40 +392,17 @@ async function iniciarWhatsApp() {
 
 
         console.log(
-          "Conexão fechada. Código:",
+          "WhatsApp desconectou:",
           statusCode
         );
 
 
         const saiuDaConta =
-
           statusCode ===
           DisconnectReason.loggedOut;
 
 
-        if (
-          saiuDaConta
-        ) {
-
-          pairingCode =
-            "";
-
-          status =
-            "Sessão desconectada. Gere um novo código.";
-
-        }
-
-        else {
-
-          pairingCode =
-            "";
-
-          status =
-            `Conexão caiu. Código: ${
-              statusCode ??
-              "desconhecido"
-            }`;
-
+        if (!saiuDaConta) {
 
           setTimeout(
             () => {
@@ -620,77 +430,7 @@ await iniciarWhatsApp();
 
 
 // ======================================================
-// DESTINO WHATSAPP
-// ======================================================
-
-function formatarDestino(
-  destino,
-  tipo
-) {
-
-  if (!destino) {
-
-    throw new Error(
-      "Destino não informado."
-    );
-
-  }
-
-
-  const valor =
-    String(
-      destino
-    ).trim();
-
-
-  if (
-    tipo === "grupo"
-  ) {
-
-    if (
-      valor.endsWith(
-        "@g.us"
-      )
-    ) {
-
-      return valor;
-
-    }
-
-    throw new Error(
-      "ID de grupo inválido."
-    );
-
-  }
-
-
-  const numero =
-    valor.replace(
-      /\D/g,
-      ""
-    );
-
-
-  if (
-    numero.length < 10
-  ) {
-
-    throw new Error(
-      "Número inválido."
-    );
-
-  }
-
-
-  return (
-    `${numero}@s.whatsapp.net`
-  );
-
-}
-
-
-// ======================================================
-// MERCADO LIVRE - PKCE
+// MERCADO LIVRE - OAUTH / TOKEN
 // ======================================================
 
 function base64URL(buffer) {
@@ -724,9 +464,7 @@ function criarPKCE() {
 
 
   const codeChallenge =
-    base64URL(
-      hash
-    );
+    base64URL(hash);
 
 
   return {
@@ -736,10 +474,6 @@ function criarPKCE() {
 
 }
 
-
-// ======================================================
-// MERCADO LIVRE - TOKEN
-// ======================================================
 
 async function trocarCodePorToken(
   code,
@@ -776,9 +510,7 @@ async function trocarCodePorToken(
   );
 
 
-  if (
-    codeVerifier
-  ) {
+  if (codeVerifier) {
 
     params.set(
       "code_verifier",
@@ -792,23 +524,14 @@ async function trocarCodePorToken(
     await fetch(
       "https://api.mercadolibre.com/oauth/token",
       {
-
-        method:
-          "POST",
+        method: "POST",
 
         headers: {
-
-          "Accept":
-            "application/json",
-
           "Content-Type":
             "application/x-www-form-urlencoded"
-
         },
 
-        body:
-          params
-
+        body: params
       }
     );
 
@@ -817,19 +540,12 @@ async function trocarCodePorToken(
     await resposta.json();
 
 
-  if (
-    !resposta.ok
-  ) {
-
-    console.error(
-      "Erro OAuth Mercado Livre:",
-      dados
-    );
+  if (!resposta.ok) {
 
     throw new Error(
       dados?.message ||
       dados?.error ||
-      "Não foi possível obter o token do Mercado Livre."
+      "Erro ao obter token."
     );
 
   }
@@ -839,7 +555,7 @@ async function trocarCodePorToken(
     Date.now();
 
 
-  const tokenCompleto = {
+  const token = {
 
     ...dados,
 
@@ -861,18 +577,14 @@ async function trocarCodePorToken(
 
   salvarJSON(
     ML_TOKEN_FILE,
-    tokenCompleto
+    token
   );
 
 
-  return tokenCompleto;
+  return token;
 
 }
 
-
-// ======================================================
-// MERCADO LIVRE - REFRESH TOKEN
-// ======================================================
 
 async function renovarTokenMercadoLivre() {
 
@@ -887,7 +599,7 @@ async function renovarTokenMercadoLivre() {
   ) {
 
     throw new Error(
-      "Não existe refresh token salvo."
+      "Refresh token não encontrado."
     );
 
   }
@@ -928,9 +640,6 @@ async function renovarTokenMercadoLivre() {
 
         headers: {
 
-          "Accept":
-            "application/json",
-
           "Content-Type":
             "application/x-www-form-urlencoded"
 
@@ -947,14 +656,11 @@ async function renovarTokenMercadoLivre() {
     await resposta.json();
 
 
-  if (
-    !resposta.ok
-  ) {
+  if (!resposta.ok) {
 
     throw new Error(
       dados?.message ||
-      dados?.error ||
-      "Não foi possível renovar o token."
+      "Erro ao renovar token."
     );
 
   }
@@ -964,7 +670,7 @@ async function renovarTokenMercadoLivre() {
     Date.now();
 
 
-  const novoToken = {
+  const token = {
 
     ...dados,
 
@@ -986,18 +692,14 @@ async function renovarTokenMercadoLivre() {
 
   salvarJSON(
     ML_TOKEN_FILE,
-    novoToken
+    token
   );
 
 
-  return novoToken;
+  return token;
 
 }
 
-
-// ======================================================
-// PEGAR TOKEN VÁLIDO
-// ======================================================
 
 async function obterTokenMercadoLivre() {
 
@@ -1012,7 +714,7 @@ async function obterTokenMercadoLivre() {
   ) {
 
     throw new Error(
-      "Mercado Livre ainda não foi autorizado."
+      "Mercado Livre não autorizado."
     );
 
   }
@@ -1033,11 +735,6 @@ async function obterTokenMercadoLivre() {
       )
   ) {
 
-    console.log(
-      "Renovando token do Mercado Livre..."
-    );
-
-
     token =
       await renovarTokenMercadoLivre();
 
@@ -1050,7 +747,720 @@ async function obterTokenMercadoLivre() {
 
 
 // ======================================================
-// SERVIDOR
+// FORMATAÇÃO DE MOEDA
+// ======================================================
+
+function formatarReais(valor) {
+
+  return Number(valor)
+    .toLocaleString(
+      "pt-BR",
+      {
+        style: "currency",
+        currency: "BRL"
+      }
+    );
+
+}
+
+
+// ======================================================
+// BUSCAR ITENS
+// ======================================================
+
+async function buscarProdutos(
+  termo,
+  accessToken
+) {
+
+  const url =
+    new URL(
+      "https://api.mercadolibre.com/sites/MLB/search"
+    );
+
+
+  url.searchParams.set(
+    "q",
+    termo
+  );
+
+
+  url.searchParams.set(
+    "limit",
+    String(
+      LIMITE_POR_BUSCA
+    )
+  );
+
+
+  const resposta =
+    await fetch(
+      url,
+      {
+        headers: {
+
+          Authorization:
+            `Bearer ${accessToken}`
+
+        }
+      }
+    );
+
+
+  if (!resposta.ok) {
+
+    console.log(
+      "Falha ao buscar:",
+      termo,
+      resposta.status
+    );
+
+    return [];
+
+  }
+
+
+  const dados =
+    await resposta.json();
+
+
+  return (
+    dados.results ||
+    []
+  );
+
+}
+
+
+// ======================================================
+// CONSULTAR PREÇOS DE UM ITEM
+// ======================================================
+
+async function consultarPrecos(
+  itemId,
+  accessToken
+) {
+
+  try {
+
+    const resposta =
+      await fetch(
+        `https://api.mercadolibre.com/items/${itemId}/prices`,
+        {
+          headers: {
+
+            Authorization:
+              `Bearer ${accessToken}`
+
+          }
+        }
+      );
+
+
+    if (!resposta.ok) {
+
+      return null;
+
+    }
+
+
+    return await resposta.json();
+
+  }
+
+  catch {
+
+    return null;
+
+  }
+
+}
+
+
+// ======================================================
+// EXTRAIR PREÇO NORMAL / PROMOCIONAL
+// ======================================================
+
+function analisarPrecos(
+  dadosPrecos,
+  fallbackPrice = null
+) {
+
+  if (
+    !dadosPrecos?.prices ||
+    !Array.isArray(
+      dadosPrecos.prices
+    )
+  ) {
+
+    if (
+      fallbackPrice
+    ) {
+
+      return {
+
+        original:
+          fallbackPrice,
+
+        promocional:
+          fallbackPrice,
+
+        desconto:
+          0
+
+      };
+
+    }
+
+
+    return null;
+
+  }
+
+
+  const precos =
+    dadosPrecos.prices;
+
+
+  let standard =
+    precos.find(
+      p =>
+        p.type ===
+        "standard"
+    );
+
+
+  let promotion =
+    precos.find(
+      p =>
+        p.type ===
+        "promotion"
+    );
+
+
+  let original = null;
+  let promocional = null;
+
+
+  if (promotion) {
+
+    promocional =
+      Number(
+        promotion.amount
+      );
+
+
+    if (
+      promotion.regular_amount
+    ) {
+
+      original =
+        Number(
+          promotion.regular_amount
+        );
+
+    }
+
+  }
+
+
+  if (
+    !original &&
+    standard
+  ) {
+
+    original =
+      Number(
+        standard.amount
+      );
+
+  }
+
+
+  if (
+    !promocional &&
+    standard
+  ) {
+
+    promocional =
+      Number(
+        standard.amount
+      );
+
+  }
+
+
+  if (
+    !original &&
+    fallbackPrice
+  ) {
+
+    original =
+      Number(
+        fallbackPrice
+      );
+
+  }
+
+
+  if (
+    !promocional &&
+    fallbackPrice
+  ) {
+
+    promocional =
+      Number(
+        fallbackPrice
+      );
+
+  }
+
+
+  if (
+    !original ||
+    !promocional
+  ) {
+
+    return null;
+
+  }
+
+
+  let desconto = 0;
+
+
+  if (
+    original >
+    promocional
+  ) {
+
+    desconto =
+      (
+        (
+          original -
+          promocional
+        ) /
+        original
+      ) *
+      100;
+
+  }
+
+
+  return {
+
+    original,
+
+    promocional,
+
+    desconto
+
+  };
+
+}
+
+
+// ======================================================
+// MONTAR MENSAGEM
+// ======================================================
+
+function montarMensagemMercadoLivre(
+  oferta
+) {
+
+  return (
+`🔥 OFERTA MERCADO LIVRE 🔥
+
+📦 ${oferta.titulo}
+
+❌ De: ~${formatarReais(oferta.preco_original)}~
+💥 Por: ${formatarReais(oferta.preco_promocional)}
+
+Clique aqui
+👉 ${oferta.link}`
+  );
+
+}
+
+
+// ======================================================
+// CAÇADOR DE OFERTAS
+// ======================================================
+
+async function cacarOfertasMercadoLivre(
+  quantidade = 20
+) {
+
+  const accessToken =
+    await obterTokenMercadoLivre();
+
+
+  const mapa =
+    new Map();
+
+
+  // ------------------------------------------
+  // BUSCA EM VÁRIOS TIPOS DE PRODUTO
+  // ------------------------------------------
+
+  for (
+    const termo of
+    BUSCAS_MERCADO_LIVRE
+  ) {
+
+    const itens =
+      await buscarProdutos(
+        termo,
+        accessToken
+      );
+
+
+    for (
+      const item of itens
+    ) {
+
+      if (!item?.id) {
+        continue;
+      }
+
+
+      if (
+        mapa.has(
+          item.id
+        )
+      ) {
+        continue;
+      }
+
+
+      if (
+        item.price &&
+        Number(item.price) >
+        PRECO_MAXIMO
+      ) {
+        continue;
+      }
+
+
+      mapa.set(
+        item.id,
+        {
+
+          id:
+            item.id,
+
+          titulo:
+            item.title,
+
+          link:
+            item.permalink,
+
+          imagem:
+            item.thumbnail,
+
+          preco_busca:
+            item.price,
+
+          vendidos:
+            item.sold_quantity ||
+            0,
+
+          categoria:
+            item.category_id,
+
+          termo_origem:
+            termo
+
+        }
+      );
+
+    }
+
+  }
+
+
+  const candidatos =
+    Array.from(
+      mapa.values()
+    );
+
+
+  console.log(
+    "Candidatos encontrados:",
+    candidatos.length
+  );
+
+
+  const ofertas =
+    [];
+
+
+  // ------------------------------------------
+  // VERIFICA PREÇO PROMOCIONAL
+  // ------------------------------------------
+
+  for (
+    const item of candidatos
+  ) {
+
+    const dadosPrecos =
+      await consultarPrecos(
+        item.id,
+        accessToken
+      );
+
+
+    const preco =
+      analisarPrecos(
+        dadosPrecos,
+        item.preco_busca
+      );
+
+
+    if (!preco) {
+      continue;
+    }
+
+
+    if (
+      preco.promocional >
+      PRECO_MAXIMO
+    ) {
+      continue;
+    }
+
+
+    if (
+      preco.desconto <
+      DESCONTO_MINIMO
+    ) {
+      continue;
+    }
+
+
+    ofertas.push({
+
+      id:
+        item.id,
+
+      titulo:
+        item.titulo,
+
+      link:
+        item.link,
+
+      imagem:
+        item.imagem,
+
+      categoria:
+        item.categoria,
+
+      termo_origem:
+        item.termo_origem,
+
+      vendidos:
+        item.vendidos,
+
+      preco_original:
+        preco.original,
+
+      preco_promocional:
+        preco.promocional,
+
+      desconto:
+        Number(
+          preco.desconto.toFixed(
+            1
+          )
+        )
+
+    });
+
+
+    // Evita consultar centenas
+    // de produtos desnecessariamente.
+    if (
+      ofertas.length >=
+      quantidade * 4
+    ) {
+
+      break;
+
+    }
+
+  }
+
+
+  // ------------------------------------------
+  // RANKING
+  // ------------------------------------------
+
+  ofertas.sort(
+    (a, b) => {
+
+      // Primeiro desconto
+      const diferencaDesconto =
+        b.desconto -
+        a.desconto;
+
+
+      if (
+        Math.abs(
+          diferencaDesconto
+        ) > 2
+      ) {
+
+        return diferencaDesconto;
+
+      }
+
+
+      // Em descontos parecidos,
+      // prioriza quem já vendeu mais.
+      return (
+        b.vendidos -
+        a.vendidos
+      );
+
+    }
+  );
+
+
+  // ------------------------------------------
+  // EVITAR REPETIR DEMAIS A MESMA BUSCA
+  // ------------------------------------------
+
+  const selecionadas =
+    [];
+
+
+  const contadorTermos =
+    new Map();
+
+
+  for (
+    const oferta of ofertas
+  ) {
+
+    const termo =
+      oferta.termo_origem;
+
+
+    const quantidadeTermo =
+      contadorTermos.get(
+        termo
+      ) || 0;
+
+
+    if (
+      quantidadeTermo >= 2
+    ) {
+
+      continue;
+
+    }
+
+
+    selecionadas.push(
+      oferta
+    );
+
+
+    contadorTermos.set(
+      termo,
+      quantidadeTermo + 1
+    );
+
+
+    if (
+      selecionadas.length >=
+      quantidade
+    ) {
+
+      break;
+
+    }
+
+  }
+
+
+  return selecionadas.map(
+    oferta => ({
+
+      ...oferta,
+
+      mensagem:
+        montarMensagemMercadoLivre(
+          oferta
+        )
+
+    })
+  );
+
+}
+
+
+// ======================================================
+// FORMATAR DESTINO WHATSAPP
+// ======================================================
+
+function formatarDestino(
+  destino,
+  tipo
+) {
+
+  if (!destino) {
+
+    throw new Error(
+      "Destino não informado."
+    );
+
+  }
+
+
+  const valor =
+    String(destino)
+      .trim();
+
+
+  if (
+    tipo === "grupo"
+  ) {
+
+    if (
+      valor.endsWith(
+        "@g.us"
+      )
+    ) {
+
+      return valor;
+
+    }
+
+
+    throw new Error(
+      "ID de grupo inválido."
+    );
+
+  }
+
+
+  const numero =
+    valor.replace(
+      /\D/g,
+      ""
+    );
+
+
+  return (
+    `${numero}@s.whatsapp.net`
+  );
+
+}
+
+
+// ======================================================
+// SERVIDOR HTTP
 // ======================================================
 
 const server =
@@ -1069,150 +1479,6 @@ const server =
 
       const caminho =
         url.pathname;
-
-
-      // ==================================================
-      // PAREAR WHATSAPP
-      // ==================================================
-
-      if (
-        req.method === "POST" &&
-        caminho === "/pair"
-      ) {
-
-        let body =
-          "";
-
-
-        req.on(
-          "data",
-          chunk => {
-
-            body +=
-              chunk.toString();
-
-          }
-        );
-
-
-        req.on(
-          "end",
-          async () => {
-
-            try {
-
-              const params =
-                new URLSearchParams(
-                  body
-                );
-
-
-              let phone =
-                params.get(
-                  "phone"
-                ) || "";
-
-
-              phone =
-                phone.replace(
-                  /\D/g,
-                  ""
-                );
-
-
-              if (
-                phone.length < 10
-              ) {
-
-                status =
-                  "Número inválido. Use 55 + DDD + número.";
-
-                pairingCode =
-                  "";
-
-
-                res.writeHead(
-                  302,
-                  {
-                    Location:
-                      "/"
-                  }
-                );
-
-                res.end();
-
-                return;
-
-              }
-
-
-              status =
-                "Gerando código de conexão...";
-
-              pairingCode =
-                "";
-
-
-              const code =
-                await sock
-                  .requestPairingCode(
-                    phone
-                  );
-
-
-              pairingCode =
-                code;
-
-              status =
-                "Código gerado. Digite-o no WhatsApp.";
-
-
-              res.writeHead(
-                302,
-                {
-                  Location:
-                    "/"
-                }
-              );
-
-              res.end();
-
-            }
-
-            catch (erro) {
-
-              console.error(
-                "Erro ao gerar código:",
-                erro
-              );
-
-
-              pairingCode =
-                "";
-
-              status =
-                "Erro ao gerar o código. Tente novamente.";
-
-
-              res.writeHead(
-                302,
-                {
-                  Location:
-                    "/"
-                }
-              );
-
-              res.end();
-
-            }
-
-          }
-        );
-
-
-        return;
-
-      }
 
 
       // ==================================================
@@ -1258,337 +1524,14 @@ const server =
 
 
       // ==================================================
-      // LISTAR GRUPOS
+      // MERCADO LIVRE - LOGIN
       // ==================================================
 
       if (
         req.method === "GET" &&
-        caminho === "/grupos"
+        caminho ===
+          "/mercadolivre/login"
       ) {
-
-        try {
-
-          if (
-            !chaveValida(
-              req
-            )
-          ) {
-
-            responderJSON(
-              res,
-              401,
-              {
-                sucesso:
-                  false,
-
-                erro:
-                  "Chave de acesso inválida."
-              }
-            );
-
-            return;
-
-          }
-
-
-          if (
-            !sock ||
-            !conectado
-          ) {
-
-            responderJSON(
-              res,
-              503,
-              {
-                sucesso:
-                  false,
-
-                erro:
-                  "WhatsApp não está conectado."
-              }
-            );
-
-            return;
-
-          }
-
-
-          const grupos =
-            await sock
-              .groupFetchAllParticipating();
-
-
-          const lista =
-            Object
-              .values(
-                grupos
-              )
-              .map(
-                grupo => ({
-
-                  nome:
-                    grupo.subject ||
-                    "Sem nome",
-
-                  id:
-                    grupo.id,
-
-                  participantes:
-                    grupo
-                      .participants
-                      ?.length ||
-                    0
-
-                })
-              )
-              .sort(
-                (a, b) =>
-                  a.nome.localeCompare(
-                    b.nome
-                  )
-              );
-
-
-          responderJSON(
-            res,
-            200,
-            {
-
-              sucesso:
-                true,
-
-              total:
-                lista.length,
-
-              grupos:
-                lista
-
-            }
-          );
-
-        }
-
-        catch (erro) {
-
-          responderJSON(
-            res,
-            500,
-            {
-
-              sucesso:
-                false,
-
-              erro:
-                erro.message
-
-            }
-          );
-
-        }
-
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // ENVIAR WHATSAPP
-      // ==================================================
-
-      if (
-        req.method === "POST" &&
-        caminho === "/send"
-      ) {
-
-        try {
-
-          if (
-            !chaveValida(
-              req
-            )
-          ) {
-
-            responderJSON(
-              res,
-              401,
-              {
-                sucesso:
-                  false,
-
-                erro:
-                  "Chave de envio inválida."
-              }
-            );
-
-            return;
-
-          }
-
-
-          if (
-            !sock ||
-            !conectado
-          ) {
-
-            responderJSON(
-              res,
-              503,
-              {
-                sucesso:
-                  false,
-
-                erro:
-                  "WhatsApp ainda não está conectado."
-              }
-            );
-
-            return;
-
-          }
-
-
-          const body =
-            await lerBodyJSON(
-              req
-            );
-
-
-          const {
-            destino,
-            mensagem,
-            tipo = "numero"
-          } = body;
-
-
-          if (
-            !mensagem ||
-            !String(
-              mensagem
-            ).trim()
-          ) {
-
-            responderJSON(
-              res,
-              400,
-              {
-                sucesso:
-                  false,
-
-                erro:
-                  "Mensagem vazia."
-              }
-            );
-
-            return;
-
-          }
-
-
-          const jid =
-            formatarDestino(
-              destino,
-              tipo
-            );
-
-
-          const resultado =
-            await sock.sendMessage(
-              jid,
-              {
-                text:
-                  String(
-                    mensagem
-                  )
-              }
-            );
-
-
-          responderJSON(
-            res,
-            200,
-            {
-
-              sucesso:
-                true,
-
-              destino:
-                jid,
-
-              mensagem:
-                "Mensagem enviada com sucesso.",
-
-              id:
-                resultado
-                  ?.key
-                  ?.id ||
-                null
-
-            }
-          );
-
-        }
-
-        catch (erro) {
-
-          console.error(
-            "Erro no /send:",
-            erro
-          );
-
-
-          responderJSON(
-            res,
-            500,
-            {
-
-              sucesso:
-                false,
-
-              erro:
-                erro.message
-
-            }
-          );
-
-        }
-
-
-        return;
-
-      }
-
-
-      // ==================================================
-      // MERCADO LIVRE - INICIAR AUTORIZAÇÃO
-      // ==================================================
-
-      if (
-        req.method === "GET" &&
-        caminho === "/mercadolivre/login"
-      ) {
-
-        if (
-          !ML_CLIENT_ID ||
-          !ML_CLIENT_SECRET
-        ) {
-
-          responderJSON(
-            res,
-            500,
-            {
-              sucesso:
-                false,
-
-              erro:
-                "ML_CLIENT_ID ou ML_CLIENT_SECRET não configurados."
-            }
-          );
-
-          return;
-
-        }
-
 
         const state =
           crypto
@@ -1628,52 +1571,40 @@ const server =
           );
 
 
-        autorizacao
-          .searchParams
-          .set(
-            "response_type",
-            "code"
-          );
+        autorizacao.searchParams.set(
+          "response_type",
+          "code"
+        );
 
 
-        autorizacao
-          .searchParams
-          .set(
-            "client_id",
-            ML_CLIENT_ID
-          );
+        autorizacao.searchParams.set(
+          "client_id",
+          ML_CLIENT_ID
+        );
 
 
-        autorizacao
-          .searchParams
-          .set(
-            "redirect_uri",
-            ML_REDIRECT_URI
-          );
+        autorizacao.searchParams.set(
+          "redirect_uri",
+          ML_REDIRECT_URI
+        );
 
 
-        autorizacao
-          .searchParams
-          .set(
-            "state",
-            state
-          );
+        autorizacao.searchParams.set(
+          "state",
+          state
+        );
 
 
-        autorizacao
-          .searchParams
-          .set(
-            "code_challenge",
-            codeChallenge
-          );
+        autorizacao.searchParams.set(
+          "code_challenge",
+          codeChallenge
+        );
 
 
-        autorizacao
-          .searchParams
-          .set(
-            "code_challenge_method",
-            "S256"
-          );
+        autorizacao.searchParams.set(
+          "code_challenge_method",
+          "S256"
+        );
 
 
         res.writeHead(
@@ -1693,7 +1624,7 @@ const server =
 
 
       // ==================================================
-      // MERCADO LIVRE - CALLBACK
+      // CALLBACK
       // ==================================================
 
       if (
@@ -1704,65 +1635,33 @@ const server =
 
         try {
 
-          const erroOAuth =
-            url
-              .searchParams
-              .get(
-                "error"
-              );
-
-
-          if (
-            erroOAuth
-          ) {
-
-            throw new Error(
-              `Mercado Livre retornou: ${erroOAuth}`
-            );
-
-          }
-
-
           const code =
-            url
-              .searchParams
-              .get(
-                "code"
-              );
-
-
-          const stateRecebido =
-            url
-              .searchParams
-              .get(
-                "state"
-              );
-
-
-          if (!code) {
-
-            throw new Error(
-              "O Mercado Livre não retornou o código de autorização."
+            url.searchParams.get(
+              "code"
             );
 
-          }
+
+          const state =
+            url.searchParams.get(
+              "state"
+            );
 
 
-          const oauthSalvo =
+          const oauth =
             lerJSON(
               ML_OAUTH_FILE
             );
 
 
           if (
-            !oauthSalvo ||
-            !stateRecebido ||
-            stateRecebido !==
-              oauthSalvo.state
+            !code ||
+            !oauth ||
+            state !==
+              oauth.state
           ) {
 
             throw new Error(
-              "Falha na validação de segurança do OAuth (state)."
+              "Falha na autorização."
             );
 
           }
@@ -1770,19 +1669,8 @@ const server =
 
           await trocarCodePorToken(
             code,
-            oauthSalvo.codeVerifier
+            oauth.codeVerifier
           );
-
-
-          try {
-
-            fs.unlinkSync(
-              ML_OAUTH_FILE
-            );
-
-          }
-
-          catch {}
 
 
           res.writeHead(
@@ -1794,92 +1682,38 @@ const server =
           );
 
 
-          res.end(`
-            <!DOCTYPE html>
+          res.end(
+            `
+            <body style="
+              background:#111;
+              color:white;
+              font-family:Arial;
+              text-align:center;
+              padding:60px;
+            ">
+              <h1>
+                ✅ Mercado Livre conectado!
+              </h1>
 
-            <html lang="pt-BR">
-
-              <head>
-                <meta charset="UTF-8">
-                <title>Mercado Livre conectado</title>
-              </head>
-
-              <body style="
-                background:#111;
-                color:white;
-                font-family:Arial,sans-serif;
-                text-align:center;
-                padding:60px;
-              ">
-
-                <h1>
-                  ✅ Mercado Livre conectado!
-                </h1>
-
-                <p>
-                  O servidor recebeu e salvou a autorização.
-                </p>
-
-                <p>
-                  Agora podemos começar a buscar produtos pela API.
-                </p>
-
-                <p>
-                  <a
-                    href="/mercadolivre/teste"
-                    style="
-                      color:#ffe600;
-                      font-size:20px;
-                    "
-                  >
-                    Testar conexão
-                  </a>
-                </p>
-
-                <p>
-                  <a
-                    href="/"
-                    style="color:white;"
-                  >
-                    Voltar
-                  </a>
-                </p>
-
-              </body>
-
-            </html>
-          `);
+              <p>
+                Agora o servidor pode buscar ofertas.
+              </p>
+            </body>
+            `
+          );
 
         }
 
         catch (erro) {
 
-          console.error(
-            "Erro no callback do Mercado Livre:",
-            erro
-          );
-
-
-          res.writeHead(
+          responderJSON(
+            res,
             500,
             {
-              "Content-Type":
-                "text/html; charset=utf-8"
+              sucesso: false,
+              erro: erro.message
             }
           );
-
-
-          res.end(`
-            <h1>
-              Erro ao conectar Mercado Livre
-            </h1>
-
-            <p>
-              ${escaparHTML(
-                erro.message
-              )}
-            </p>
-          `);
 
         }
 
@@ -1890,51 +1724,47 @@ const server =
 
 
       // ==================================================
-      // MERCADO LIVRE - TESTAR TOKEN
+      // CAÇADOR DE OFERTAS
       // ==================================================
 
       if (
         req.method === "GET" &&
         caminho ===
-          "/mercadolivre/teste"
+          "/mercadolivre/ofertas"
       ) {
 
         try {
 
-          const accessToken =
-            await obterTokenMercadoLivre();
-
-
-          const resposta =
-            await fetch(
-              "https://api.mercadolibre.com/users/me",
-              {
-
-                headers: {
-
-                  Authorization:
-                    `Bearer ${accessToken}`
-
-                }
-
-              }
+          let quantidade =
+            Number(
+              url.searchParams.get(
+                "quantidade"
+              ) || 10
             );
-
-
-          const dados =
-            await resposta.json();
 
 
           if (
-            !resposta.ok
+            quantidade < 1
           ) {
 
-            throw new Error(
-              dados?.message ||
-              "Erro na API do Mercado Livre."
-            );
+            quantidade = 1;
 
           }
+
+
+          if (
+            quantidade > 50
+          ) {
+
+            quantidade = 50;
+
+          }
+
+
+          const ofertas =
+            await cacarOfertasMercadoLivre(
+              quantidade
+            );
 
 
           responderJSON(
@@ -1945,21 +1775,11 @@ const server =
               sucesso:
                 true,
 
-              mensagem:
-                "Mercado Livre conectado corretamente.",
+              total:
+                ofertas.length,
 
-              usuario: {
-
-                id:
-                  dados.id,
-
-                apelido:
-                  dados.nickname,
-
-                pais:
-                  dados.country_id
-
-              }
+              ofertas:
+                ofertas
 
             }
           );
@@ -1967,6 +1787,12 @@ const server =
         }
 
         catch (erro) {
+
+          console.error(
+            "Erro no caçador:",
+            erro
+          );
+
 
           responderJSON(
             res,
@@ -1991,7 +1817,205 @@ const server =
 
 
       // ==================================================
-      // PÁGINA PRINCIPAL
+      // GRUPOS
+      // ==================================================
+
+      if (
+        req.method === "GET" &&
+        caminho === "/grupos"
+      ) {
+
+        try {
+
+          if (
+            !chaveValida(
+              req
+            )
+          ) {
+
+            responderJSON(
+              res,
+              401,
+              {
+                sucesso:
+                  false,
+
+                erro:
+                  "Chave inválida."
+              }
+            );
+
+            return;
+
+          }
+
+
+          const grupos =
+            await sock
+              .groupFetchAllParticipating();
+
+
+          const lista =
+            Object.values(
+              grupos
+            ).map(
+              grupo => ({
+
+                nome:
+                  grupo.subject,
+
+                id:
+                  grupo.id,
+
+                participantes:
+                  grupo.participants
+                    ?.length ||
+                  0
+
+              })
+            );
+
+
+          responderJSON(
+            res,
+            200,
+            {
+
+              sucesso:
+                true,
+
+              grupos:
+                lista
+
+            }
+          );
+
+        }
+
+        catch (erro) {
+
+          responderJSON(
+            res,
+            500,
+            {
+              sucesso:
+                false,
+
+              erro:
+                erro.message
+            }
+          );
+
+        }
+
+
+        return;
+
+      }
+
+
+      // ==================================================
+      // SEND
+      // ==================================================
+
+      if (
+        req.method === "POST" &&
+        caminho === "/send"
+      ) {
+
+        try {
+
+          if (
+            !chaveValida(
+              req
+            )
+          ) {
+
+            responderJSON(
+              res,
+              401,
+              {
+                sucesso:
+                  false,
+
+                erro:
+                  "Chave inválida."
+              }
+            );
+
+            return;
+
+          }
+
+
+          const body =
+            await lerBodyJSON(
+              req
+            );
+
+
+          const jid =
+            formatarDestino(
+              body.destino,
+              body.tipo
+            );
+
+
+          const resultado =
+            await sock.sendMessage(
+              jid,
+              {
+                text:
+                  String(
+                    body.mensagem
+                  )
+              }
+            );
+
+
+          responderJSON(
+            res,
+            200,
+            {
+
+              sucesso:
+                true,
+
+              id:
+                resultado
+                  ?.key
+                  ?.id ||
+                null
+
+            }
+          );
+
+        }
+
+        catch (erro) {
+
+          responderJSON(
+            res,
+            500,
+            {
+              sucesso:
+                false,
+
+              erro:
+                erro.message
+            }
+          );
+
+        }
+
+
+        return;
+
+      }
+
+
+      // ==================================================
+      // PÁGINA SIMPLES
       // ==================================================
 
       res.writeHead(
@@ -2004,16 +2028,45 @@ const server =
 
 
       res.end(
-        pagina()
+        `
+        <body style="
+          background:#111;
+          color:white;
+          font-family:Arial;
+          text-align:center;
+          padding:50px;
+        ">
+
+          <h1>
+            Sistema de Ofertas
+          </h1>
+
+          <p>
+            WhatsApp:
+            ${conectado
+              ? "✅ conectado"
+              : "❌ desconectado"}
+          </p>
+
+          <p>
+            <a
+              href="/mercadolivre/ofertas?quantidade=10"
+              style="
+                color:#ffe600;
+                font-size:20px;
+              "
+            >
+              Procurar 10 ofertas do Mercado Livre
+            </a>
+          </p>
+
+        </body>
+        `
       );
 
     }
   );
 
-
-// ======================================================
-// INICIAR SERVIDOR
-// ======================================================
 
 server.listen(
   PORT,
