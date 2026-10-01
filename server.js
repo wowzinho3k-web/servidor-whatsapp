@@ -98,7 +98,9 @@ async function iniciarWhatsApp() {
   sock = makeWASocket({
     auth: state,
     logger: pino({ level: "silent" }),
-    browser: Browsers.macOS("Desktop"),
+    browser: Browsers.ubuntu("Chrome"),
+    printQRInTerminal: false,
+    syncFullHistory: false,
     markOnlineOnConnect: false
   });
 
@@ -117,6 +119,8 @@ async function iniciarWhatsApp() {
       const statusCode =
         lastDisconnect?.error?.output?.statusCode;
 
+      console.log("Conexão fechada. Código:", statusCode);
+
       const saiuDaConta =
         statusCode === DisconnectReason.loggedOut;
 
@@ -124,7 +128,8 @@ async function iniciarWhatsApp() {
         pairingCode = "";
         status = "Sessão desconectada. Gere um novo código.";
       } else {
-        status = "Conexão caiu. Reconectando...";
+        pairingCode = "";
+        status = `Conexão caiu. Código: ${statusCode ?? "desconhecido"}`;
 
         setTimeout(() => {
           iniciarWhatsApp().catch(console.error);
@@ -155,10 +160,7 @@ const server = http.createServer((req, res) => {
           status = "Número inválido. Use 55 + DDD + número.";
           pairingCode = "";
 
-          res.writeHead(302, {
-            Location: "/"
-          });
-
+          res.writeHead(302, { Location: "/" });
           res.end();
           return;
         }
@@ -171,22 +173,16 @@ const server = http.createServer((req, res) => {
         pairingCode = code;
         status = "Código gerado. Digite-o no WhatsApp.";
 
-        res.writeHead(302, {
-          Location: "/"
-        });
-
+        res.writeHead(302, { Location: "/" });
         res.end();
 
       } catch (erro) {
-        console.error(erro);
+        console.error("Erro ao gerar código:", erro);
 
         pairingCode = "";
         status = "Erro ao gerar o código. Tente novamente.";
 
-        res.writeHead(302, {
-          Location: "/"
-        });
-
+        res.writeHead(302, { Location: "/" });
         res.end();
       }
     });
