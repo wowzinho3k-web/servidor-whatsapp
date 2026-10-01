@@ -2,7 +2,10 @@ import http from "http";
 import fs from "fs";
 import makeWASocket, {
   DisconnectReason,
-  useMultiFileAuthState
+  useMultiFileAuthState,
+  fetchLatestWaWebVersion,
+  fetchLatestBaileysVersion,
+  Browsers
 } from "@whiskeysockets/baileys";
 import QRCode from "qrcode";
 import pino from "pino";
@@ -15,13 +18,31 @@ fs.mkdirSync(AUTH_DIR, { recursive: true });
 let status = "Iniciando conexão com o WhatsApp...";
 let qrImage = null;
 
+async function obterVersaoWhatsApp() {
+  try {
+    const { version } = await fetchLatestWaWebVersion();
+    console.log("Usando versão atual do WhatsApp Web:", version.join("."));
+    return version;
+  } catch (erro) {
+    console.log("Falhou versão ao vivo. Tentando versão do Baileys.");
+
+    const { version } = await fetchLatestBaileysVersion();
+    return version;
+  }
+}
+
 async function iniciarWhatsApp() {
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  const version = await obterVersaoWhatsApp();
 
   const sock = makeWASocket({
+    version,
     auth: state,
     logger: pino({ level: "silent" }),
-    markOnlineOnConnect: false
+    browser: Browsers.macOS("Chrome"),
+    markOnlineOnConnect: false,
+    connectTimeoutMs: 60000,
+    qrTimeout: 60000
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -44,15 +65,21 @@ async function iniciarWhatsApp() {
       const statusCode =
         lastDisconnect?.error?.output?.statusCode;
 
-      const desconectado =
+      console.log("Conexão fechada. Código:", statusCode);
+
+      const saiuDaConta =
         statusCode === DisconnectReason.loggedOut;
 
-      if (desconectado) {
+      if (saiuDaConta) {
         qrImage = null;
         status = "Sessão desconectada. Será necessário conectar novamente.";
       } else {
-        status = "Conexão caiu. Reconectando...";
-        setTimeout(iniciarWhatsApp, 3000);
+        qrImage = null;
+        status = `Conexão caiu. Tentando novamente... Código: ${statusCode ?? "desconhecido"}`;
+
+        setTimeout(() => {
+          iniciarWhatsApp().catch(console.error);
+        }, 5000);
       }
     }
   });
@@ -77,6 +104,7 @@ const server = http.createServer((req, res) => {
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>Servidor WhatsApp</title>
       </head>
+
       <body style="
         background:#111;
         color:white;
@@ -85,15 +113,22 @@ const server = http.createServer((req, res) => {
         padding:40px;
       ">
         <h1>Servidor WhatsApp</h1>
+
         <h2>${status}</h2>
 
         ${
           qrImage
-            ? `<img
+            ? `
+              <img
                 src="${qrImage}"
                 alt="QR Code WhatsApp"
-                style="max-width:320px;background:white;padding:15px;"
-              >`
+                style="
+                  max-width:320px;
+                  background:white;
+                  padding:15px;
+                "
+              >
+            `
             : ""
         }
 
