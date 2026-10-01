@@ -3,11 +3,8 @@ import fs from "fs";
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
-  fetchLatestWaWebVersion,
-  fetchLatestBaileysVersion,
   Browsers
 } from "@whiskeysockets/baileys";
-import QRCode from "qrcode";
 import pino from "pino";
 
 const PORT = process.env.PORT || 3000;
@@ -15,94 +12,18 @@ const AUTH_DIR = "/data/baileys-auth";
 
 fs.mkdirSync(AUTH_DIR, { recursive: true });
 
-let status = "Iniciando conexão com o WhatsApp...";
-let qrImage = null;
+let sock = null;
+let status = "Servidor iniciado. Informe seu número para gerar o código.";
+let pairingCode = "";
 
-async function obterVersaoWhatsApp() {
-  try {
-    const { version } = await fetchLatestWaWebVersion();
-    console.log("Usando versão atual do WhatsApp Web:", version.join("."));
-    return version;
-  } catch (erro) {
-    console.log("Falhou versão ao vivo. Tentando versão do Baileys.");
-
-    const { version } = await fetchLatestBaileysVersion();
-    return version;
-  }
-}
-
-async function iniciarWhatsApp() {
-  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
-  const version = await obterVersaoWhatsApp();
-
-  const sock = makeWASocket({
-    version,
-    auth: state,
-    logger: pino({ level: "silent" }),
-    browser: Browsers.macOS("Chrome"),
-    markOnlineOnConnect: false,
-    connectTimeoutMs: 60000,
-    qrTimeout: 60000
-  });
-
-  sock.ev.on("creds.update", saveCreds);
-
-  sock.ev.on("connection.update", async (update) => {
-    const { connection, lastDisconnect, qr } = update;
-
-    if (qr) {
-      qrImage = await QRCode.toDataURL(qr);
-      status = "Escaneie o QR Code com o WhatsApp";
-    }
-
-    if (connection === "open") {
-      qrImage = null;
-      status = "WhatsApp conectado com sucesso!";
-      console.log("WhatsApp conectado.");
-    }
-
-    if (connection === "close") {
-      const statusCode =
-        lastDisconnect?.error?.output?.statusCode;
-
-      console.log("Conexão fechada. Código:", statusCode);
-
-      const saiuDaConta =
-        statusCode === DisconnectReason.loggedOut;
-
-      if (saiuDaConta) {
-        qrImage = null;
-        status = "Sessão desconectada. Será necessário conectar novamente.";
-      } else {
-        qrImage = null;
-        status = `Conexão caiu. Tentando novamente... Código: ${statusCode ?? "desconhecido"}`;
-
-        setTimeout(() => {
-          iniciarWhatsApp().catch(console.error);
-        }, 5000);
-      }
-    }
-  });
-}
-
-iniciarWhatsApp().catch((erro) => {
-  console.error(erro);
-  status = "Erro ao iniciar o WhatsApp.";
-});
-
-const server = http.createServer((req, res) => {
-  res.writeHead(200, {
-    "Content-Type": "text/html; charset=utf-8"
-  });
-
-  res.end(`
+function pagina() {
+  return `
     <!DOCTYPE html>
     <html lang="pt-BR">
       <head>
         <meta charset="UTF-8">
-        <meta http-equiv="refresh" content="5">
         <meta name="viewport" content="width=device-width, initial-scale=1">
-        <title>Servidor WhatsApp</title>
+        <title>Conectar WhatsApp</title>
       </head>
 
       <body style="
@@ -112,30 +33,172 @@ const server = http.createServer((req, res) => {
         text-align:center;
         padding:40px;
       ">
-        <h1>Servidor WhatsApp</h1>
+        <h1>Conectar WhatsApp</h1>
 
-        <h2>${status}</h2>
+        <p>${status}</p>
 
         ${
-          qrImage
+          pairingCode
             ? `
-              <img
-                src="${qrImage}"
-                alt="QR Code WhatsApp"
-                style="
-                  max-width:320px;
-                  background:white;
-                  padding:15px;
-                "
-              >
-            `
-            : ""
-        }
+              <div style="
+                font-size:36px;
+                font-weight:bold;
+                letter-spacing:6px;
+                margin:30px;
+              ">
+                ${pairingCode}
+              </div>
 
-        <p>A página atualiza automaticamente a cada 5 segundos.</p>
+              <p>
+                No celular: WhatsApp → Aparelhos conectados →
+                Conectar um aparelho → Conectar com número de telefone
+              </p>
+            `
+            : `
+              <form method="POST" action="/pair">
+                <input
+                  type="text"
+                  name="phone"
+                  placeholder="Ex.: 5569999999999"
+                  style="
+                    padding:12px;
+                    font-size:18px;
+                    width:260px;
+                  "
+                  required
+                >
+
+                <br><br>
+
+                <button
+                  type="submit"
+                  style="
+                    padding:12px 25px;
+                    font-size:18px;
+                    cursor:pointer;
+                  "
+                >
+                  Gerar código
+                </button>
+              </form>
+
+              <p style="margin-top:25px;">
+                Digite somente números: 55 + DDD + número.
+              </p>
+            `
+        }
       </body>
     </html>
-  `);
+  `;
+}
+
+async function iniciarWhatsApp() {
+  const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+
+  sock = makeWASocket({
+    auth: state,
+    logger: pino({ level: "silent" }),
+    browser: Browsers.macOS("Desktop"),
+    markOnlineOnConnect: false
+  });
+
+  sock.ev.on("creds.update", saveCreds);
+
+  sock.ev.on("connection.update", (update) => {
+    const { connection, lastDisconnect } = update;
+
+    if (connection === "open") {
+      pairingCode = "";
+      status = "WhatsApp conectado com sucesso!";
+      console.log("WhatsApp conectado.");
+    }
+
+    if (connection === "close") {
+      const statusCode =
+        lastDisconnect?.error?.output?.statusCode;
+
+      const saiuDaConta =
+        statusCode === DisconnectReason.loggedOut;
+
+      if (saiuDaConta) {
+        pairingCode = "";
+        status = "Sessão desconectada. Gere um novo código.";
+      } else {
+        status = "Conexão caiu. Reconectando...";
+
+        setTimeout(() => {
+          iniciarWhatsApp().catch(console.error);
+        }, 5000);
+      }
+    }
+  });
+}
+
+await iniciarWhatsApp();
+
+const server = http.createServer((req, res) => {
+  if (req.method === "POST" && req.url === "/pair") {
+    let body = "";
+
+    req.on("data", chunk => {
+      body += chunk.toString();
+    });
+
+    req.on("end", async () => {
+      try {
+        const params = new URLSearchParams(body);
+        let phone = params.get("phone") || "";
+
+        phone = phone.replace(/\D/g, "");
+
+        if (phone.length < 10) {
+          status = "Número inválido. Use 55 + DDD + número.";
+          pairingCode = "";
+
+          res.writeHead(302, {
+            Location: "/"
+          });
+
+          res.end();
+          return;
+        }
+
+        status = "Gerando código de conexão...";
+        pairingCode = "";
+
+        const code = await sock.requestPairingCode(phone);
+
+        pairingCode = code;
+        status = "Código gerado. Digite-o no WhatsApp.";
+
+        res.writeHead(302, {
+          Location: "/"
+        });
+
+        res.end();
+
+      } catch (erro) {
+        console.error(erro);
+
+        pairingCode = "";
+        status = "Erro ao gerar o código. Tente novamente.";
+
+        res.writeHead(302, {
+          Location: "/"
+        });
+
+        res.end();
+      }
+    });
+
+    return;
+  }
+
+  res.writeHead(200, {
+    "Content-Type": "text/html; charset=utf-8"
+  });
+
+  res.end(pagina());
 });
 
 server.listen(PORT, "0.0.0.0", () => {
