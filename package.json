@@ -1,8 +1,17 @@
 {
   "name": "servidor-whatsapp",
   "version": "1.0.0",
+  "type": "module",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@whiskeysockets/baileys": "latest",
+    "qrcode": "latest",
+    "pino": "latest"
   }
 }
