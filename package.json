@@ -13,7 +13,7 @@
     "@whiskeysockets/baileys": "latest",
     "qrcode": "latest",
     "pino": "latest",
-    "puppeteer-core": "25.12.0",
-    "@sparticuz/chromium": "latest"
+    "puppeteer-core": "25.11.0",
+    "@sparticuz/chromium": "153.0.0"
   }
 }
