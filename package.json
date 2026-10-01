@@ -12,6 +12,7 @@
   "dependencies": {
     "@whiskeysockets/baileys": "latest",
     "qrcode": "latest",
-    "pino": "latest"
+    "pino": "latest",
+    "puppeteer": "latest"
   }
 }
