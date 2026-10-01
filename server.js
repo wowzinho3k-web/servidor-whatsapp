@@ -147,7 +147,7 @@ function responderJSON(
 
 
 // ======================================================
-// CHAVE DE SEGURANÇA
+// CHAVE
 // ======================================================
 
 function chaveValida(
@@ -197,9 +197,7 @@ function lerBodyJSON(
 
           try {
 
-            if (
-              !body
-            ) {
+            if (!body) {
 
               resolve({});
 
@@ -240,7 +238,7 @@ function lerBodyJSON(
 
 
 // ======================================================
-// ARQUIVOS JSON
+// JSON
 // ======================================================
 
 function salvarJSON(
@@ -436,6 +434,41 @@ function normalizarOferta(
       null
 
   };
+
+}
+
+
+// ======================================================
+// FORMATAR VALOR
+// ======================================================
+
+function formatarNumeroBR(
+  valor
+) {
+
+  const numero =
+    Number(
+      valor
+    );
+
+  if (
+    !Number.isFinite(
+      numero
+    )
+  ) {
+
+    return null;
+
+  }
+
+  return numero
+    .toLocaleString(
+      "pt-BR",
+      {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      }
+    );
 
 }
 
@@ -756,7 +789,7 @@ function criarAssinaturaShopee(
       1000
     );
 
-  const textoAssinatura =
+  const base =
     `${SHOPEE_APP_ID}${timestamp}${payload}${SHOPEE_SECRET}`;
 
   const signature =
@@ -765,7 +798,7 @@ function criarAssinaturaShopee(
         "sha256"
       )
       .update(
-        textoAssinatura,
+        base,
         "utf8"
       )
       .digest(
@@ -781,7 +814,7 @@ function criarAssinaturaShopee(
 
 
 // ======================================================
-// SHOPEE - GRAPHQL
+// SHOPEE - CONSULTA
 // ======================================================
 
 async function consultarShopee(
@@ -809,10 +842,6 @@ async function consultarShopee(
 
   }
 
-
-  // IMPORTANTE:
-  // A assinatura precisa usar exatamente
-  // a mesma string enviada no body.
 
   const payload =
     JSON.stringify({
@@ -859,22 +888,8 @@ async function consultarShopee(
     );
 
 
-  let dados;
-
-  try {
-
-    dados =
-      await resposta.json();
-
-  }
-
-  catch {
-
-    throw new Error(
-      `Shopee respondeu HTTP ${resposta.status}, mas a resposta não era JSON.`
-    );
-
-  }
+  const dados =
+    await resposta.json();
 
 
   if (
@@ -894,7 +909,7 @@ async function consultarShopee(
 
 
 // ======================================================
-// SHOPEE - TESTE REAL
+// SHOPEE - TESTE
 // ======================================================
 
 async function testarShopee() {
@@ -945,27 +960,13 @@ async function testarShopee() {
 
 
   if (
-    Array.isArray(
-      resposta?.errors
-    ) &&
-    resposta.errors.length >
-      0
+    resposta?.errors?.length
   ) {
 
     return {
 
       sucesso:
         false,
-
-      autenticado:
-        !resposta.errors.some(
-          erro =>
-            String(
-              erro?.extensions?.code ||
-              ""
-            ) ===
-            "10020"
-        ),
 
       errors:
         resposta.errors
@@ -997,42 +998,238 @@ async function testarShopee() {
 
     produto_teste:
       produto
-        ? {
-
-            id:
-              produto.itemId,
-
-            nome:
-              produto.productName,
-
-            preco_min:
-              produto.priceMin,
-
-            preco_max:
-              produto.priceMax,
-
-            desconto:
-              produto.priceDiscountRate,
-
-            loja:
-              produto.shopName,
-
-            vendas:
-              produto.sales,
-
-            avaliacao:
-              produto.ratingStar,
-
-            comissao:
-              produto.commissionRate,
-
-            link_afiliado:
-              produto.offerLink
-
-          }
-        : null
 
   };
+
+}
+
+
+// ======================================================
+// SHOPEE - BUSCAR OFERTAS
+// ======================================================
+
+async function buscarOfertasShopee(
+  quantidade = 10
+) {
+
+  quantidade =
+    Math.max(
+      1,
+      Math.min(
+        50,
+        Number(
+          quantidade ||
+          10
+        )
+      )
+    );
+
+
+  const query =
+    `
+      query BuscarOfertasShopee(
+        $page: Int,
+        $limit: Int
+      ) {
+        productOfferV2(
+          page: $page,
+          limit: $limit
+        ) {
+          nodes {
+            itemId
+            productName
+            priceMin
+            priceMax
+            priceDiscountRate
+            imageUrl
+            productLink
+            offerLink
+            shopName
+            sales
+            ratingStar
+            commissionRate
+          }
+
+          pageInfo {
+            page
+            limit
+            hasNextPage
+          }
+        }
+      }
+    `;
+
+
+  const resposta =
+    await consultarShopee(
+      query,
+      {
+        page:
+          1,
+
+        limit:
+          quantidade
+      }
+    );
+
+
+  if (
+    resposta?.errors?.length
+  ) {
+
+    throw new Error(
+      JSON.stringify(
+        resposta.errors
+      )
+    );
+
+  }
+
+
+  const produtos =
+    resposta
+      ?.data
+      ?.productOfferV2
+      ?.nodes;
+
+
+  if (
+    !Array.isArray(
+      produtos
+    )
+  ) {
+
+    return [];
+
+  }
+
+
+  const ofertas =
+    [];
+
+
+  for (
+    const produto of
+    produtos
+  ) {
+
+    if (
+      !produto
+    ) {
+
+      continue;
+
+    }
+
+
+    const titulo =
+      String(
+        produto.productName ||
+        ""
+      ).trim();
+
+
+    const link =
+      String(
+        produto.offerLink ||
+        produto.productLink ||
+        ""
+      ).trim();
+
+
+    const precoNumerico =
+      Number(
+        produto.priceMin ||
+        produto.priceMax ||
+        0
+      );
+
+
+    if (
+      !titulo ||
+      !link ||
+      !precoNumerico
+    ) {
+
+      continue;
+
+    }
+
+
+    ofertas.push({
+
+      plataforma:
+        "SHOPEE",
+
+      marketplace:
+        "shopee",
+
+      id:
+        produto.itemId
+          ? String(
+              produto.itemId
+            )
+          : null,
+
+      titulo:
+        titulo,
+
+      preco:
+        formatarNumeroBR(
+          precoNumerico
+        ),
+
+      precoNumerico:
+        precoNumerico,
+
+      precoOriginalFormatado:
+        null,
+
+      precoOriginalNumerico:
+        0,
+
+      desconto:
+        Number(
+          produto.priceDiscountRate ||
+          0
+        ),
+
+      loja:
+        produto.shopName ||
+        null,
+
+      vendas:
+        Number(
+          produto.sales ||
+          0
+        ),
+
+      avaliacao:
+        Number(
+          produto.ratingStar ||
+          0
+        ),
+
+      comissao:
+        produto.commissionRate ||
+        null,
+
+      imagem:
+        produto.imageUrl ||
+        null,
+
+      link:
+        link
+
+    });
+
+  }
+
+
+  return ofertas.slice(
+    0,
+    quantidade
+  );
 
 }
 
@@ -1056,10 +1253,12 @@ function formatarDestino(
 
   }
 
+
   const valor =
     String(
       destino
     ).trim();
+
 
   if (
     tipo ===
@@ -1076,17 +1275,20 @@ function formatarDestino(
 
     }
 
+
     throw new Error(
       "ID de grupo inválido."
     );
 
   }
 
+
   const numero =
     valor.replace(
       /\D/g,
       ""
     );
+
 
   return (
     `${numero}@s.whatsapp.net`
@@ -1096,7 +1298,7 @@ function formatarDestino(
 
 
 // ======================================================
-// SERVIDOR HTTP
+// SERVIDOR
 // ======================================================
 
 const server =
@@ -1110,10 +1312,6 @@ const server =
         res
       );
 
-
-      // ==================================================
-      // OPTIONS
-      // ==================================================
 
       if (
         req.method ===
@@ -1137,6 +1335,7 @@ const server =
           `http://${req.headers.host}`
         );
 
+
       const caminho =
         url.pathname;
 
@@ -1157,8 +1356,10 @@ const server =
             ML_TOKEN_FILE
           );
 
+
         const fila =
           carregarFila();
+
 
         responderJSON(
           res,
@@ -1199,13 +1400,14 @@ const server =
           }
         );
 
+
         return;
 
       }
 
 
       // ==================================================
-      // SHOPEE - TESTE
+      // SHOPEE TESTE
       // ==================================================
 
       if (
@@ -1219,6 +1421,7 @@ const server =
 
           const resultado =
             await testarShopee();
+
 
           responderJSON(
             res,
@@ -1234,20 +1437,12 @@ const server =
           erro
         ) {
 
-          console.error(
-            "Erro Shopee:",
-            erro
-          );
-
           responderJSON(
             res,
             500,
             {
 
               sucesso:
-                false,
-
-              autenticado:
                 false,
 
               erro:
@@ -1258,13 +1453,119 @@ const server =
 
         }
 
+
         return;
 
       }
 
 
       // ==================================================
-      // MERCADO LIVRE - LOGIN
+      // SHOPEE OFERTAS
+      // ==================================================
+
+      if (
+        req.method ===
+          "GET" &&
+        caminho ===
+          "/shopee/ofertas"
+      ) {
+
+        try {
+
+          let quantidade =
+            Number(
+              url.searchParams.get(
+                "quantidade"
+              ) ||
+              10
+            );
+
+
+          if (
+            quantidade < 1
+          ) {
+
+            quantidade =
+              1;
+
+          }
+
+
+          if (
+            quantidade > 50
+          ) {
+
+            quantidade =
+              50;
+
+          }
+
+
+          const ofertas =
+            await buscarOfertasShopee(
+              quantidade
+            );
+
+
+          responderJSON(
+            res,
+            200,
+            {
+
+              sucesso:
+                true,
+
+              plataforma:
+                "SHOPEE",
+
+              solicitado:
+                quantidade,
+
+              total:
+                ofertas.length,
+
+              ofertas:
+                ofertas
+
+            }
+          );
+
+        }
+
+        catch (
+          erro
+        ) {
+
+          console.error(
+            "Erro buscando Shopee:",
+            erro
+          );
+
+
+          responderJSON(
+            res,
+            500,
+            {
+
+              sucesso:
+                false,
+
+              erro:
+                erro.message
+
+            }
+          );
+
+        }
+
+
+        return;
+
+      }
+
+
+      // ==================================================
+      // MERCADO LIVRE LOGIN
       // ==================================================
 
       if (
@@ -1382,6 +1683,7 @@ const server =
             }
           );
 
+
           res.end();
 
         }
@@ -1394,15 +1696,18 @@ const server =
             res,
             500,
             {
+
               sucesso:
                 false,
 
               erro:
                 erro.message
+
             }
           );
 
         }
+
 
         return;
 
@@ -1410,7 +1715,7 @@ const server =
 
 
       // ==================================================
-      // MERCADO LIVRE - CALLBACK
+      // MERCADO LIVRE CALLBACK
       // ==================================================
 
       if (
@@ -1427,10 +1732,12 @@ const server =
               "code"
             );
 
+
           const state =
             url.searchParams.get(
               "state"
             );
+
 
           const oauth =
             lerJSON(
@@ -1495,15 +1802,18 @@ const server =
             res,
             500,
             {
+
               sucesso:
                 false,
 
               erro:
                 erro.message
+
             }
           );
 
         }
+
 
         return;
 
@@ -1511,7 +1821,7 @@ const server =
 
 
       // ==================================================
-      // FILA - VER
+      // FILA
       // ==================================================
 
       if (
@@ -1531,13 +1841,16 @@ const server =
             res,
             401,
             {
+
               sucesso:
                 false,
 
               erro:
                 "Chave inválida."
+
             }
           );
+
 
           return;
 
@@ -1572,13 +1885,14 @@ const server =
           }
         );
 
+
         return;
 
       }
 
 
       // ==================================================
-      // FILA - ADICIONAR
+      // FILA ADICIONAR
       // ==================================================
 
       if (
@@ -1600,13 +1914,16 @@ const server =
               res,
               401,
               {
+
                 sucesso:
                   false,
 
                 erro:
                   "Chave inválida."
+
               }
             );
+
 
             return;
 
@@ -1667,8 +1984,7 @@ const server =
 
 
           for (
-            const item of
-            fila
+            const item of fila
           ) {
 
             if (
@@ -1680,6 +1996,7 @@ const server =
               );
 
             }
+
 
             if (
               item.link
@@ -1819,15 +2136,18 @@ const server =
             res,
             500,
             {
+
               sucesso:
                 false,
 
               erro:
                 erro.message
+
             }
           );
 
         }
+
 
         return;
 
@@ -1835,7 +2155,7 @@ const server =
 
 
       // ==================================================
-      // FILA - LIMPAR
+      // FILA LIMPAR
       // ==================================================
 
       if (
@@ -1855,13 +2175,16 @@ const server =
             res,
             401,
             {
+
               sucesso:
                 false,
 
               erro:
                 "Chave inválida."
+
             }
           );
+
 
           return;
 
@@ -1877,13 +2200,16 @@ const server =
           res,
           200,
           {
+
             sucesso:
               true,
 
             mensagem:
               "Fila limpa."
+
           }
         );
+
 
         return;
 
@@ -1913,13 +2239,16 @@ const server =
               res,
               401,
               {
+
                 sucesso:
                   false,
 
                 erro:
                   "Chave inválida."
+
               }
             );
+
 
             return;
 
@@ -1970,11 +2299,13 @@ const server =
             res,
             200,
             {
+
               sucesso:
                 true,
 
               grupos:
                 lista
+
             }
           );
 
@@ -1988,15 +2319,18 @@ const server =
             res,
             500,
             {
+
               sucesso:
                 false,
 
               erro:
                 erro.message
+
             }
           );
 
         }
+
 
         return;
 
@@ -2026,13 +2360,16 @@ const server =
               res,
               401,
               {
+
                 sucesso:
                   false,
 
                 erro:
                   "Chave inválida."
+
               }
             );
+
 
             return;
 
@@ -2079,10 +2416,12 @@ const server =
             await sock.sendMessage(
               jid,
               {
+
                 text:
                   String(
                     body.mensagem
                   )
+
               }
             );
 
@@ -2114,15 +2453,18 @@ const server =
             res,
             500,
             {
+
               sucesso:
                 false,
 
               erro:
                 erro.message
+
             }
           );
 
         }
+
 
         return;
 
@@ -2192,7 +2534,19 @@ const server =
                 font-size:18px;
               "
             >
-              Testar API da Shopee
+              Testar Shopee
+            </a>
+          </p>
+
+          <p>
+            <a
+              href="/shopee/ofertas?quantidade=10"
+              style="
+                color:#22c55e;
+                font-size:18px;
+              "
+            >
+              Buscar 10 ofertas da Shopee
             </a>
           </p>
 
