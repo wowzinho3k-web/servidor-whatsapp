@@ -1,7 +1,9 @@
 import http from "http";
 import fs from "fs";
 import crypto from "crypto";
-import puppeteer from "puppeteer";
+
+import puppeteer from "puppeteer-core";
+import chromium from "@sparticuz/chromium";
 
 import makeWASocket, {
   DisconnectReason,
@@ -109,7 +111,6 @@ const BUSCAS_MERCADO_LIVRE = [
   "garrafa térmica"
 ];
 
-
 const LIMITE_POR_BUSCA = 10;
 
 const DESCONTO_MINIMO = 10;
@@ -165,6 +166,7 @@ function lerBodyJSON(req) {
     (resolve, reject) => {
 
       let body = "";
+
 
       req.on(
         "data",
@@ -367,6 +369,7 @@ async function iniciarWhatsApp() {
 
         conectado = false;
 
+
         const statusCode =
           lastDisconnect
             ?.error
@@ -413,7 +416,7 @@ await iniciarWhatsApp();
 
 
 // ======================================================
-// MERCADO LIVRE - OAUTH / TOKEN
+// MERCADO LIVRE - OAUTH
 // ======================================================
 
 function base64URL(buffer) {
@@ -569,6 +572,10 @@ async function trocarCodePorToken(
 }
 
 
+// ======================================================
+// RENOVAR TOKEN MERCADO LIVRE
+// ======================================================
+
 async function renovarTokenMercadoLivre() {
 
   const tokenAtual =
@@ -684,6 +691,10 @@ async function renovarTokenMercadoLivre() {
 }
 
 
+// ======================================================
+// OBTER TOKEN MERCADO LIVRE
+// ======================================================
+
 async function obterTokenMercadoLivre() {
 
   let token =
@@ -730,7 +741,7 @@ async function obterTokenMercadoLivre() {
 
 
 // ======================================================
-// FORMATAÇÃO DE MOEDA
+// FORMATAÇÃO
 // ======================================================
 
 function formatarReais(valor) {
@@ -748,7 +759,7 @@ function formatarReais(valor) {
 
 
 // ======================================================
-// BUSCAR ITENS - MÉTODO ANTIGO
+// BUSCA ANTIGA DO MERCADO LIVRE
 // ======================================================
 
 async function buscarProdutos(
@@ -905,7 +916,7 @@ function analisarPrecos(
     dadosPrecos.prices;
 
 
-  let standard =
+  const standard =
     precos.find(
       p =>
         p.type ===
@@ -913,7 +924,7 @@ function analisarPrecos(
     );
 
 
-  let promotion =
+  const promotion =
     precos.find(
       p =>
         p.type ===
@@ -1376,7 +1387,7 @@ async function cacarOfertasMercadoLivre(
 
 
 // ======================================================
-// FORMATAR DESTINO WHATSAPP
+// DESTINO WHATSAPP
 // ======================================================
 
 function formatarDestino(
@@ -1435,7 +1446,8 @@ function formatarDestino(
 
 
 // ======================================================
-// TESTAR NAVEGADOR PUPPETEER
+// TESTE DO NAVEGADOR
+// PUPPETEER CORE + SPARTICUZ CHROMIUM
 // ======================================================
 
 async function testarNavegador() {
@@ -1445,16 +1457,36 @@ async function testarNavegador() {
 
   try {
 
+    console.log(
+      "Preparando Chromium..."
+    );
+
+
+    const executablePath =
+      await chromium.executablePath();
+
+
+    console.log(
+      "Executável Chromium:",
+      executablePath
+    );
+
+
     browser =
       await puppeteer.launch({
-        headless: true,
 
-        args: [
-          "--no-sandbox",
-          "--disable-setuid-sandbox",
-          "--disable-dev-shm-usage",
-          "--disable-gpu"
-        ]
+        args:
+          chromium.args,
+
+        defaultViewport:
+          chromium.defaultViewport,
+
+        executablePath:
+          executablePath,
+
+        headless:
+          "shell"
+
       });
 
 
@@ -1472,20 +1504,30 @@ async function testarNavegador() {
       "Mozilla/5.0 (X11; Linux x86_64) " +
       "AppleWebKit/537.36 " +
       "(KHTML, like Gecko) " +
-      "Chrome/124.0.0.0 Safari/537.36"
+      "Chrome/153.0.0.0 Safari/537.36"
     );
 
 
     await page.goto(
       "https://www.mercadolivre.com.br/",
       {
+
         waitUntil:
           "domcontentloaded",
 
         timeout:
           60000
+
       }
     );
+
+
+    const titulo =
+      await page.title();
+
+
+    const urlFinal =
+      page.url();
 
 
     return {
@@ -1497,10 +1539,13 @@ async function testarNavegador() {
         "Navegador funcionando no servidor.",
 
       titulo:
-        await page.title(),
+        titulo,
 
       url:
-        page.url()
+        urlFinal,
+
+      executavel:
+        executablePath
 
     };
 
@@ -1508,13 +1553,22 @@ async function testarNavegador() {
 
   catch (erro) {
 
+    console.error(
+      "Erro no navegador:",
+      erro
+    );
+
+
     return {
 
       sucesso:
         false,
 
       erro:
-        erro.message
+        erro.message,
+
+      tipo:
+        erro.name || "Erro"
 
     };
 
@@ -1564,7 +1618,7 @@ const server =
 
 
       // ==================================================
-      // TESTE DO NAVEGADOR
+      // TESTAR NAVEGADOR
       // ==================================================
 
       if (
@@ -1597,7 +1651,8 @@ const server =
 
       if (
         req.method === "GET" &&
-        caminho === "/status"
+        caminho ===
+          "/status"
       ) {
 
         const tokenML =
@@ -1622,7 +1677,10 @@ const server =
             mercado_livre:
               tokenML?.access_token
                 ? "autorizado"
-                : "não autorizado"
+                : "não autorizado",
+
+            navegador:
+              "rota /teste-navegador disponível"
 
           }
         );
@@ -1634,7 +1692,7 @@ const server =
 
 
       // ==================================================
-      // MERCADO LIVRE - LOGIN
+      // MERCADO LIVRE LOGIN
       // ==================================================
 
       if (
@@ -1734,7 +1792,7 @@ const server =
 
 
       // ==================================================
-      // MERCADO LIVRE - CALLBACK
+      // CALLBACK MERCADO LIVRE
       // ==================================================
 
       if (
@@ -1841,7 +1899,7 @@ const server =
 
 
       // ==================================================
-      // CAÇADOR ANTIGO
+      // OFERTAS MERCADO LIVRE - MÉTODO ANTIGO
       // ==================================================
 
       if (
@@ -1934,12 +1992,13 @@ const server =
 
 
       // ==================================================
-      // GRUPOS
+      // GRUPOS WHATSAPP
       // ==================================================
 
       if (
         req.method === "GET" &&
-        caminho === "/grupos"
+        caminho ===
+          "/grupos"
       ) {
 
         try {
@@ -2048,12 +2107,13 @@ const server =
 
 
       // ==================================================
-      // SEND
+      // ENVIAR WHATSAPP
       // ==================================================
 
       if (
         req.method === "POST" &&
-        caminho === "/send"
+        caminho ===
+          "/send"
       ) {
 
         try {
@@ -2099,6 +2159,17 @@ const server =
             await lerBodyJSON(
               req
             );
+
+
+          if (
+            !body.mensagem
+          ) {
+
+            throw new Error(
+              "Mensagem não informada."
+            );
+
+          }
 
 
           const jid =
@@ -2209,7 +2280,19 @@ const server =
                 font-size:20px;
               "
             >
-              Testar navegador
+              🌐 Testar navegador
+            </a>
+          </p>
+
+          <p>
+            <a
+              href="/status"
+              style="
+                color:#38bdf8;
+                font-size:20px;
+              "
+            >
+              📡 Ver status
             </a>
           </p>
 
