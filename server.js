@@ -24,6 +24,11 @@ const AUTH_DIR =
 const SEND_KEY =
   process.env.SEND_KEY || "";
 
+
+// ======================================================
+// MERCADO LIVRE
+// ======================================================
+
 const ML_CLIENT_ID =
   process.env.ML_CLIENT_ID || "";
 
@@ -38,6 +43,25 @@ const ML_TOKEN_FILE =
 
 const ML_OAUTH_FILE =
   "/data/mercadolivre-oauth.json";
+
+
+// ======================================================
+// SHOPEE
+// ======================================================
+
+const SHOPEE_APP_ID =
+  process.env.SHOPEE_APP_ID || "";
+
+const SHOPEE_SECRET =
+  process.env.SHOPEE_SECRET || "";
+
+const SHOPEE_ENDPOINT =
+  "https://open-api.affiliate.shopee.com.br/graphql";
+
+
+// ======================================================
+// FILA
+// ======================================================
 
 const FILA_FILE =
   "/data/fila-ofertas.json";
@@ -65,10 +89,11 @@ let status =
 
 // ======================================================
 // CORS
-// IMPORTANTE PARA A EXTENSÃO DO CHROME
 // ======================================================
 
-function aplicarCORS(res) {
+function aplicarCORS(
+  res
+) {
 
   res.setHeader(
     "Access-Control-Allow-Origin",
@@ -98,7 +123,9 @@ function responderJSON(
   objeto
 ) {
 
-  aplicarCORS(res);
+  aplicarCORS(
+    res
+  );
 
   res.writeHead(
     statusCode,
@@ -123,27 +150,34 @@ function responderJSON(
 // CHAVE DE SEGURANÇA
 // ======================================================
 
-function chaveValida(req) {
+function chaveValida(
+  req
+) {
 
-  const chaveRecebida =
+  const recebida =
     req.headers["x-send-key"];
 
   return (
     SEND_KEY &&
-    chaveRecebida === SEND_KEY
+    recebida === SEND_KEY
   );
 
 }
 
 
 // ======================================================
-// LER BODY JSON
+// BODY JSON
 // ======================================================
 
-function lerBodyJSON(req) {
+function lerBodyJSON(
+  req
+) {
 
   return new Promise(
-    (resolve, reject) => {
+    (
+      resolve,
+      reject
+    ) => {
 
       let body = "";
 
@@ -157,14 +191,15 @@ function lerBodyJSON(req) {
         }
       );
 
-
       req.on(
         "end",
         () => {
 
           try {
 
-            if (!body) {
+            if (
+              !body
+            ) {
 
               resolve({});
 
@@ -172,9 +207,10 @@ function lerBodyJSON(req) {
 
             }
 
-
             resolve(
-              JSON.parse(body)
+              JSON.parse(
+                body
+              )
             );
 
           }
@@ -191,7 +227,6 @@ function lerBodyJSON(req) {
 
         }
       );
-
 
       req.on(
         "error",
@@ -242,7 +277,6 @@ function lerJSON(
 
     }
 
-
     return JSON.parse(
       fs.readFileSync(
         arquivo,
@@ -252,10 +286,12 @@ function lerJSON(
 
   }
 
-  catch (erro) {
+  catch (
+    erro
+  ) {
 
     console.error(
-      "Erro ao ler JSON:",
+      "Erro lendo JSON:",
       erro
     );
 
@@ -267,7 +303,7 @@ function lerJSON(
 
 
 // ======================================================
-// FILA DE OFERTAS
+// FILA
 // ======================================================
 
 function carregarFila() {
@@ -277,19 +313,11 @@ function carregarFila() {
       FILA_FILE
     );
 
-
-  if (
-    !Array.isArray(
-      fila
-    )
-  ) {
-
-    return [];
-
-  }
-
-
-  return fila;
+  return Array.isArray(
+    fila
+  )
+    ? fila
+    : [];
 
 }
 
@@ -325,15 +353,15 @@ function normalizarOferta(
 
   const titulo =
     String(
-      oferta?.titulo || ""
+      oferta?.titulo ||
+      ""
     ).trim();
-
 
   const link =
     String(
-      oferta?.link || ""
+      oferta?.link ||
+      ""
     ).trim();
-
 
   if (
     !titulo ||
@@ -344,7 +372,6 @@ function normalizarOferta(
 
   }
 
-
   return {
 
     fila_id:
@@ -353,7 +380,8 @@ function normalizarOferta(
     marketplace:
       String(
         oferta.marketplace ||
-        "mercadolivre"
+        oferta.plataforma ||
+        ""
       )
         .trim()
         .toLowerCase(),
@@ -388,24 +416,12 @@ function normalizarOferta(
         ? String(
             oferta.precoOriginalFormatado
           )
-        : (
-            oferta.preco_original
-              ? String(
-                  oferta.preco_original
-                )
-              : null
-          ),
+        : null,
 
     preco_original_numerico:
       Number(
         oferta.precoOriginalNumerico ||
         oferta.preco_original_numerico ||
-        0
-      ),
-
-    ordem_original:
-      Number(
-        oferta.ordem ||
         0
       ),
 
@@ -438,15 +454,16 @@ async function iniciarWhatsApp() {
       AUTH_DIR
     );
 
-
   sock =
     makeWASocket({
 
-      auth: state,
+      auth:
+        state,
 
       logger:
         pino({
-          level: "silent"
+          level:
+            "silent"
         }),
 
       browser:
@@ -465,12 +482,10 @@ async function iniciarWhatsApp() {
 
     });
 
-
   sock.ev.on(
     "creds.update",
     saveCreds
   );
-
 
   sock.ev.on(
     "connection.update",
@@ -479,14 +494,16 @@ async function iniciarWhatsApp() {
       const {
         connection,
         lastDisconnect
-      } = update;
-
+      } =
+        update;
 
       if (
-        connection === "open"
+        connection ===
+        "open"
       ) {
 
-        conectado = true;
+        conectado =
+          true;
 
         status =
           "WhatsApp conectado.";
@@ -497,13 +514,13 @@ async function iniciarWhatsApp() {
 
       }
 
-
       if (
-        connection === "close"
+        connection ===
+        "close"
       ) {
 
-        conectado = false;
-
+        conectado =
+          false;
 
         const statusCode =
           lastDisconnect
@@ -511,17 +528,14 @@ async function iniciarWhatsApp() {
             ?.output
             ?.statusCode;
 
-
         console.log(
           "WhatsApp desconectou:",
           statusCode
         );
 
-
         const saiuDaConta =
           statusCode ===
           DisconnectReason.loggedOut;
-
 
         if (
           !saiuDaConta
@@ -589,7 +603,6 @@ function criarPKCE() {
       )
     );
 
-
   const hash =
     crypto
       .createHash(
@@ -600,12 +613,10 @@ function criarPKCE() {
       )
       .digest();
 
-
   const codeChallenge =
     base64URL(
       hash
     );
-
 
   return {
     codeVerifier,
@@ -616,7 +627,7 @@ function criarPKCE() {
 
 
 // ======================================================
-// MERCADO LIVRE - TROCAR CODE POR TOKEN
+// MERCADO LIVRE - TOKEN
 // ======================================================
 
 async function trocarCodePorToken(
@@ -626,7 +637,6 @@ async function trocarCodePorToken(
 
   const params =
     new URLSearchParams();
-
 
   params.set(
     "grant_type",
@@ -653,7 +663,6 @@ async function trocarCodePorToken(
     ML_REDIRECT_URI
   );
 
-
   if (
     codeVerifier
   ) {
@@ -664,7 +673,6 @@ async function trocarCodePorToken(
     );
 
   }
-
 
   const resposta =
     await fetch(
@@ -687,10 +695,8 @@ async function trocarCodePorToken(
       }
     );
 
-
   const dados =
     await resposta.json();
-
 
   if (
     !resposta.ok
@@ -704,10 +710,8 @@ async function trocarCodePorToken(
 
   }
 
-
   const agora =
     Date.now();
-
 
   const token = {
 
@@ -728,12 +732,10 @@ async function trocarCodePorToken(
 
   };
 
-
   salvarJSON(
     ML_TOKEN_FILE,
     token
   );
-
 
   return token;
 
@@ -741,7 +743,302 @@ async function trocarCodePorToken(
 
 
 // ======================================================
-// FORMATAR DESTINO WHATSAPP
+// SHOPEE - ASSINATURA
+// ======================================================
+
+function criarAssinaturaShopee(
+  payload
+) {
+
+  const timestamp =
+    Math.floor(
+      Date.now() /
+      1000
+    );
+
+  const textoAssinatura =
+    `${SHOPEE_APP_ID}${timestamp}${payload}${SHOPEE_SECRET}`;
+
+  const signature =
+    crypto
+      .createHash(
+        "sha256"
+      )
+      .update(
+        textoAssinatura,
+        "utf8"
+      )
+      .digest(
+        "hex"
+      );
+
+  return {
+    timestamp,
+    signature
+  };
+
+}
+
+
+// ======================================================
+// SHOPEE - GRAPHQL
+// ======================================================
+
+async function consultarShopee(
+  query,
+  variables = {}
+) {
+
+  if (
+    !SHOPEE_APP_ID
+  ) {
+
+    throw new Error(
+      "SHOPEE_APP_ID não configurado."
+    );
+
+  }
+
+  if (
+    !SHOPEE_SECRET
+  ) {
+
+    throw new Error(
+      "SHOPEE_SECRET não configurado."
+    );
+
+  }
+
+
+  // IMPORTANTE:
+  // A assinatura precisa usar exatamente
+  // a mesma string enviada no body.
+
+  const payload =
+    JSON.stringify({
+      query,
+      variables
+    });
+
+
+  const {
+    timestamp,
+    signature
+  } =
+    criarAssinaturaShopee(
+      payload
+    );
+
+
+  const authorization =
+    `SHA256 Credential=${SHOPEE_APP_ID}, Timestamp=${timestamp}, Signature=${signature}`;
+
+
+  const resposta =
+    await fetch(
+      SHOPEE_ENDPOINT,
+      {
+
+        method:
+          "POST",
+
+        headers: {
+
+          "Content-Type":
+            "application/json",
+
+          "Authorization":
+            authorization
+
+        },
+
+        body:
+          payload
+
+      }
+    );
+
+
+  let dados;
+
+  try {
+
+    dados =
+      await resposta.json();
+
+  }
+
+  catch {
+
+    throw new Error(
+      `Shopee respondeu HTTP ${resposta.status}, mas a resposta não era JSON.`
+    );
+
+  }
+
+
+  if (
+    !resposta.ok
+  ) {
+
+    throw new Error(
+      `Shopee HTTP ${resposta.status}: ${JSON.stringify(dados)}`
+    );
+
+  }
+
+
+  return dados;
+
+}
+
+
+// ======================================================
+// SHOPEE - TESTE REAL
+// ======================================================
+
+async function testarShopee() {
+
+  const query =
+    `
+      query TesteShopee(
+        $page: Int,
+        $limit: Int
+      ) {
+        productOfferV2(
+          page: $page,
+          limit: $limit
+        ) {
+          nodes {
+            itemId
+            productName
+            priceMin
+            priceMax
+            priceDiscountRate
+            imageUrl
+            productLink
+            offerLink
+            shopName
+            sales
+            ratingStar
+            commissionRate
+          }
+
+          pageInfo {
+            page
+            limit
+            hasNextPage
+          }
+        }
+      }
+    `;
+
+
+  const resposta =
+    await consultarShopee(
+      query,
+      {
+        page: 1,
+        limit: 1
+      }
+    );
+
+
+  if (
+    Array.isArray(
+      resposta?.errors
+    ) &&
+    resposta.errors.length >
+      0
+  ) {
+
+    return {
+
+      sucesso:
+        false,
+
+      autenticado:
+        !resposta.errors.some(
+          erro =>
+            String(
+              erro?.extensions?.code ||
+              ""
+            ) ===
+            "10020"
+        ),
+
+      errors:
+        resposta.errors
+
+    };
+
+  }
+
+
+  const produto =
+    resposta
+      ?.data
+      ?.productOfferV2
+      ?.nodes
+      ?.[0] ||
+    null;
+
+
+  return {
+
+    sucesso:
+      true,
+
+    autenticado:
+      true,
+
+    mensagem:
+      "Shopee Affiliate API conectada.",
+
+    produto_teste:
+      produto
+        ? {
+
+            id:
+              produto.itemId,
+
+            nome:
+              produto.productName,
+
+            preco_min:
+              produto.priceMin,
+
+            preco_max:
+              produto.priceMax,
+
+            desconto:
+              produto.priceDiscountRate,
+
+            loja:
+              produto.shopName,
+
+            vendas:
+              produto.sales,
+
+            avaliacao:
+              produto.ratingStar,
+
+            comissao:
+              produto.commissionRate,
+
+            link_afiliado:
+              produto.offerLink
+
+          }
+        : null
+
+  };
+
+}
+
+
+// ======================================================
+// DESTINO WHATSAPP
 // ======================================================
 
 function formatarDestino(
@@ -759,13 +1056,10 @@ function formatarDestino(
 
   }
 
-
   const valor =
     String(
       destino
-    )
-      .trim();
-
+    ).trim();
 
   if (
     tipo ===
@@ -782,20 +1076,17 @@ function formatarDestino(
 
     }
 
-
     throw new Error(
       "ID de grupo inválido."
     );
 
   }
 
-
   const numero =
     valor.replace(
       /\D/g,
       ""
     );
-
 
   return (
     `${numero}@s.whatsapp.net`
@@ -805,7 +1096,7 @@ function formatarDestino(
 
 
 // ======================================================
-// SERVIDOR
+// SERVIDOR HTTP
 // ======================================================
 
 const server =
@@ -821,7 +1112,7 @@ const server =
 
 
       // ==================================================
-      // PREFLIGHT DA EXTENSÃO
+      // OPTIONS
       // ==================================================
 
       if (
@@ -846,7 +1137,6 @@ const server =
           `http://${req.headers.host}`
         );
 
-
       const caminho =
         url.pathname;
 
@@ -867,10 +1157,8 @@ const server =
             ML_TOKEN_FILE
           );
 
-
         const fila =
           carregarFila();
-
 
         responderJSON(
           res,
@@ -890,6 +1178,14 @@ const server =
                 ? "autorizado"
                 : "não autorizado",
 
+            shopee:
+              (
+                SHOPEE_APP_ID &&
+                SHOPEE_SECRET
+              )
+                ? "configurada"
+                : "não configurada",
+
             fila:
               fila.length,
 
@@ -903,6 +1199,64 @@ const server =
           }
         );
 
+        return;
+
+      }
+
+
+      // ==================================================
+      // SHOPEE - TESTE
+      // ==================================================
+
+      if (
+        req.method ===
+          "GET" &&
+        caminho ===
+          "/shopee/teste"
+      ) {
+
+        try {
+
+          const resultado =
+            await testarShopee();
+
+          responderJSON(
+            res,
+            resultado.sucesso
+              ? 200
+              : 400,
+            resultado
+          );
+
+        }
+
+        catch (
+          erro
+        ) {
+
+          console.error(
+            "Erro Shopee:",
+            erro
+          );
+
+          responderJSON(
+            res,
+            500,
+            {
+
+              sucesso:
+                false,
+
+              autenticado:
+                false,
+
+              erro:
+                erro.message
+
+            }
+          );
+
+        }
 
         return;
 
@@ -910,7 +1264,7 @@ const server =
 
 
       // ==================================================
-      // MERCADO LIVRE LOGIN
+      // MERCADO LIVRE - LOGIN
       // ==================================================
 
       if (
@@ -928,7 +1282,7 @@ const server =
           ) {
 
             throw new Error(
-              "ML_CLIENT_ID ou ML_CLIENT_SECRET não configurado."
+              "Mercado Livre não configurado."
             );
 
           }
@@ -1028,29 +1382,27 @@ const server =
             }
           );
 
-
           res.end();
 
         }
 
-        catch (erro) {
+        catch (
+          erro
+        ) {
 
           responderJSON(
             res,
             500,
             {
-
               sucesso:
                 false,
 
               erro:
                 erro.message
-
             }
           );
 
         }
-
 
         return;
 
@@ -1058,7 +1410,7 @@ const server =
 
 
       // ==================================================
-      // MERCADO LIVRE CALLBACK
+      // MERCADO LIVRE - CALLBACK
       // ==================================================
 
       if (
@@ -1075,12 +1427,10 @@ const server =
               "code"
             );
 
-
           const state =
             url.searchParams.get(
               "state"
             );
-
 
           const oauth =
             lerJSON(
@@ -1120,7 +1470,7 @@ const server =
           res.end(
             `
             <body style="
-              background:#111;
+              background:#111827;
               color:white;
               font-family:Arial;
               text-align:center;
@@ -1131,34 +1481,29 @@ const server =
                 ✅ Mercado Livre conectado!
               </h1>
 
-              <p>
-                Autorização concluída.
-              </p>
-
             </body>
             `
           );
 
         }
 
-        catch (erro) {
+        catch (
+          erro
+        ) {
 
           responderJSON(
             res,
             500,
             {
-
               sucesso:
                 false,
 
               erro:
                 erro.message
-
             }
           );
 
         }
-
 
         return;
 
@@ -1186,13 +1531,11 @@ const server =
             res,
             401,
             {
-
               sucesso:
                 false,
 
               erro:
                 "Chave inválida."
-
             }
           );
 
@@ -1229,14 +1572,13 @@ const server =
           }
         );
 
-
         return;
 
       }
 
 
       // ==================================================
-      // FILA - ADICIONAR OFERTAS
+      // FILA - ADICIONAR
       // ==================================================
 
       if (
@@ -1258,13 +1600,11 @@ const server =
               res,
               401,
               {
-
                 sucesso:
                   false,
 
                 erro:
                   "Chave inválida."
-
               }
             );
 
@@ -1322,31 +1662,31 @@ const server =
             carregarFila();
 
 
-          const chavesExistentes =
+          const existentes =
             new Set();
 
 
           for (
-            const item of fila
+            const item of
+            fila
           ) {
 
             if (
               item.produto_id
             ) {
 
-              chavesExistentes.add(
-                `id:${item.produto_id}`
+              existentes.add(
+                `${item.marketplace}:id:${item.produto_id}`
               );
 
             }
-
 
             if (
               item.link
             ) {
 
-              chavesExistentes.add(
-                `link:${item.link}`
+              existentes.add(
+                `${item.marketplace}:link:${item.link}`
               );
 
             }
@@ -1388,22 +1728,22 @@ const server =
 
             const chaveId =
               oferta.produto_id
-                ? `id:${oferta.produto_id}`
+                ? `${oferta.marketplace}:id:${oferta.produto_id}`
                 : null;
 
 
             const chaveLink =
-              `link:${oferta.link}`;
+              `${oferta.marketplace}:link:${oferta.link}`;
 
 
             if (
               (
                 chaveId &&
-                chavesExistentes.has(
+                existentes.has(
                   chaveId
                 )
               ) ||
-              chavesExistentes.has(
+              existentes.has(
                 chaveLink
               )
             ) {
@@ -1424,14 +1764,14 @@ const server =
               chaveId
             ) {
 
-              chavesExistentes.add(
+              existentes.add(
                 chaveId
               );
 
             }
 
 
-            chavesExistentes.add(
+            existentes.add(
               chaveLink
             );
 
@@ -1464,38 +1804,30 @@ const server =
               invalidas,
 
               total_na_fila:
-                fila.length,
-
-              pendentes:
-                fila.filter(
-                  item =>
-                    item.status ===
-                    "pendente"
-                ).length
+                fila.length
 
             }
           );
 
         }
 
-        catch (erro) {
+        catch (
+          erro
+        ) {
 
           responderJSON(
             res,
             500,
             {
-
               sucesso:
                 false,
 
               erro:
                 erro.message
-
             }
           );
 
         }
-
 
         return;
 
@@ -1523,13 +1855,11 @@ const server =
             res,
             401,
             {
-
               sucesso:
                 false,
 
               erro:
                 "Chave inválida."
-
             }
           );
 
@@ -1547,16 +1877,13 @@ const server =
           res,
           200,
           {
-
             sucesso:
               true,
 
             mensagem:
               "Fila limpa."
-
           }
         );
-
 
         return;
 
@@ -1586,13 +1913,11 @@ const server =
               res,
               401,
               {
-
                 sucesso:
                   false,
 
                 erro:
                   "Chave inválida."
-
               }
             );
 
@@ -1607,7 +1932,7 @@ const server =
           ) {
 
             throw new Error(
-              "WhatsApp não está conectado."
+              "WhatsApp não conectado."
             );
 
           }
@@ -1645,36 +1970,33 @@ const server =
             res,
             200,
             {
-
               sucesso:
                 true,
 
               grupos:
                 lista
-
             }
           );
 
         }
 
-        catch (erro) {
+        catch (
+          erro
+        ) {
 
           responderJSON(
             res,
             500,
             {
-
               sucesso:
                 false,
 
               erro:
                 erro.message
-
             }
           );
 
         }
-
 
         return;
 
@@ -1704,13 +2026,11 @@ const server =
               res,
               401,
               {
-
                 sucesso:
                   false,
 
                 erro:
                   "Chave inválida."
-
               }
             );
 
@@ -1725,7 +2045,7 @@ const server =
           ) {
 
             throw new Error(
-              "WhatsApp não está conectado."
+              "WhatsApp não conectado."
             );
 
           }
@@ -1759,12 +2079,10 @@ const server =
             await sock.sendMessage(
               jid,
               {
-
                 text:
                   String(
                     body.mensagem
                   )
-
               }
             );
 
@@ -1788,24 +2106,23 @@ const server =
 
         }
 
-        catch (erro) {
+        catch (
+          erro
+        ) {
 
           responderJSON(
             res,
             500,
             {
-
               sucesso:
                 false,
 
               erro:
                 erro.message
-
             }
           );
 
         }
-
 
         return;
 
@@ -1840,7 +2157,7 @@ const server =
         ">
 
           <h1>
-            🤖 Sistema Achadinhos
+            ⚡ Achadinhos Automático
           </h1>
 
           <p>
@@ -1853,31 +2170,30 @@ const server =
           </p>
 
           <p>
-            Ofertas na fila:
-            <strong>
-              ${fila.length}
-            </strong>
+            Shopee:
+            ${
+              SHOPEE_APP_ID &&
+              SHOPEE_SECRET
+                ? "✅ configurada"
+                : "❌ não configurada"
+            }
           </p>
 
           <p>
-            Pendentes:
-            <strong>
-              ${
-                fila.filter(
-                  item =>
-                    item.status ===
-                    "pendente"
-                ).length
-              }
-            </strong>
+            Fila:
+            ${fila.length} ofertas
           </p>
 
-          <p style="
-            color:#94a3b8;
-            margin-top:30px;
-          ">
-            Servidor pronto para receber ofertas
-            da extensão Achadinhos Automático.
+          <p>
+            <a
+              href="/shopee/teste"
+              style="
+                color:#fb923c;
+                font-size:18px;
+              "
+            >
+              Testar API da Shopee
+            </a>
           </p>
 
         </body>
@@ -1889,7 +2205,7 @@ const server =
 
 
 // ======================================================
-// INICIAR SERVIDOR
+// INICIAR
 // ======================================================
 
 server.listen(
