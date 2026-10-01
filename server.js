@@ -60,48 +60,34 @@ const SHOPEE_ENDPOINT =
 
 
 // ======================================================
-// CONFIGURAÇÃO DO FILTRO SHOPEE
+// FILTRO SHOPEE
 // ======================================================
 
-// Evita ofertas muito baratas que normalmente
-// têm pouca relevância e itens muito caros/pesados.
-const SHOPEE_PRECO_MINIMO =
-  15;
+const SHOPEE_PRECO_MINIMO = 15;
 
-const SHOPEE_PRECO_MAXIMO =
-  1500;
+const SHOPEE_PRECO_MAXIMO = 1500;
 
+const SHOPEE_DESCONTO_MINIMO = 10;
 
-// Desconto mínimo desejável.
-// Se não houver candidatos suficientes,
-// há uma segunda passagem mais flexível.
-const SHOPEE_DESCONTO_MINIMO =
-  10;
+const SHOPEE_AVALIACAO_MINIMA = 4.4;
 
+const SHOPEE_MULTIPLICADOR_CANDIDATOS = 5;
 
-// Nota mínima desejável.
-const SHOPEE_AVALIACAO_MINIMA =
-  4.4;
-
-
-// Quantos produtos analisar para cada
-// oferta que queremos entregar.
-const SHOPEE_MULTIPLICADOR_CANDIDATOS =
-  5;
-
-
-// Máximo de candidatos que vamos analisar
-// numa única chamada da rota.
-const SHOPEE_MAX_CANDIDATOS =
-  80;
+const SHOPEE_MAX_CANDIDATOS = 80;
 
 
 // ======================================================
-// FILA
+// FILA / DISPARADOR
 // ======================================================
 
 const FILA_FILE =
   "/data/fila-ofertas.json";
+
+const DISPARADOR_FILE =
+  "/data/disparador-config.json";
+
+const INTERVALO_PADRAO_SEGUNDOS =
+  600;
 
 
 fs.mkdirSync(
@@ -128,9 +114,7 @@ let status =
 // CORS
 // ======================================================
 
-function aplicarCORS(
-  res
-) {
+function aplicarCORS(res) {
 
   res.setHeader(
     "Access-Control-Allow-Origin",
@@ -146,7 +130,6 @@ function aplicarCORS(
     "Access-Control-Allow-Headers",
     "Content-Type, x-send-key"
   );
-
 }
 
 
@@ -160,9 +143,7 @@ function responderJSON(
   objeto
 ) {
 
-  aplicarCORS(
-    res
-  );
+  aplicarCORS(res);
 
   res.writeHead(
     statusCode,
@@ -179,17 +160,14 @@ function responderJSON(
       2
     )
   );
-
 }
 
 
 // ======================================================
-// CHAVE DE SEGURANÇA
+// SEGURANÇA
 // ======================================================
 
-function chaveValida(
-  req
-) {
+function chaveValida(req) {
 
   const recebida =
     req.headers["x-send-key"];
@@ -198,17 +176,14 @@ function chaveValida(
     SEND_KEY &&
     recebida === SEND_KEY
   );
-
 }
 
 
 // ======================================================
-// BODY JSON
+// LER BODY JSON
 // ======================================================
 
-function lerBodyJSON(
-  req
-) {
+function lerBodyJSON(req) {
 
   return new Promise(
     (
@@ -224,7 +199,6 @@ function lerBodyJSON(
 
           body +=
             chunk.toString();
-
         }
       );
 
@@ -235,23 +209,16 @@ function lerBodyJSON(
 
           try {
 
-            if (
-              !body
-            ) {
+            if (!body) {
 
               resolve({});
 
               return;
-
             }
 
-
             resolve(
-              JSON.parse(
-                body
-              )
+              JSON.parse(body)
             );
-
           }
 
           catch {
@@ -261,9 +228,7 @@ function lerBodyJSON(
                 "JSON inválido."
               )
             );
-
           }
-
         }
       );
 
@@ -272,10 +237,8 @@ function lerBodyJSON(
         "error",
         reject
       );
-
     }
   );
-
 }
 
 
@@ -297,13 +260,10 @@ function salvarJSON(
     ),
     "utf8"
   );
-
 }
 
 
-function lerJSON(
-  arquivo
-) {
+function lerJSON(arquivo) {
 
   try {
 
@@ -314,7 +274,6 @@ function lerJSON(
     ) {
 
       return null;
-
     }
 
 
@@ -324,12 +283,9 @@ function lerJSON(
         "utf8"
       )
     );
-
   }
 
-  catch (
-    erro
-  ) {
+  catch (erro) {
 
     console.error(
       "Erro lendo JSON:",
@@ -337,9 +293,7 @@ function lerJSON(
     );
 
     return null;
-
   }
-
 }
 
 
@@ -355,43 +309,30 @@ function carregarFila() {
     );
 
 
-  return Array.isArray(
-    fila
-  )
+  return Array.isArray(fila)
     ? fila
     : [];
-
 }
 
 
-function salvarFila(
-  fila
-) {
+function salvarFila(fila) {
 
   salvarJSON(
     FILA_FILE,
     fila
   );
-
 }
 
 
 function criarIdFila() {
 
   return crypto
-    .randomBytes(
-      12
-    )
-    .toString(
-      "hex"
-    );
-
+    .randomBytes(12)
+    .toString("hex");
 }
 
 
-function normalizarOferta(
-  oferta
-) {
+function normalizarOferta(oferta) {
 
   const titulo =
     String(
@@ -413,7 +354,6 @@ function normalizarOferta(
   ) {
 
     return null;
-
   }
 
 
@@ -433,9 +373,7 @@ function normalizarOferta(
 
     produto_id:
       oferta.id
-        ? String(
-            oferta.id
-          )
+        ? String(oferta.id)
         : null,
 
     titulo,
@@ -485,10 +423,11 @@ function normalizarOferta(
         .toISOString(),
 
     enviado_em:
+      null,
+
+    erro_envio:
       null
-
   };
-
 }
 
 
@@ -496,36 +435,27 @@ function normalizarOferta(
 // FORMATAÇÃO
 // ======================================================
 
-function formatarNumeroBR(
-  valor
-) {
+function formatarNumeroBR(valor) {
 
   const numero =
-    Number(
-      valor
-    );
+    Number(valor);
 
 
   if (
-    !Number.isFinite(
-      numero
-    )
+    !Number.isFinite(numero)
   ) {
 
     return null;
-
   }
 
 
-  return numero
-    .toLocaleString(
-      "pt-BR",
-      {
-        minimumFractionDigits: 2,
-        maximumFractionDigits: 2
-      }
-    );
-
+  return numero.toLocaleString(
+    "pt-BR",
+    {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }
+  );
 }
 
 
@@ -569,7 +499,6 @@ async function iniciarWhatsApp() {
 
       markOnlineOnConnect:
         false
-
     });
 
 
@@ -604,7 +533,6 @@ async function iniciarWhatsApp() {
         console.log(
           "WhatsApp conectado."
         );
-
       }
 
 
@@ -646,49 +574,27 @@ async function iniciarWhatsApp() {
                 .catch(
                   console.error
                 );
-
             },
             5000
           );
-
         }
-
       }
-
     }
   );
-
 }
-
-
-await iniciarWhatsApp();
 
 
 // ======================================================
 // MERCADO LIVRE - PKCE
 // ======================================================
 
-function base64URL(
-  buffer
-) {
+function base64URL(buffer) {
 
   return buffer
-    .toString(
-      "base64"
-    )
-    .replace(
-      /\+/g,
-      "-"
-    )
-    .replace(
-      /\//g,
-      "_"
-    )
-    .replace(
-      /=+$/g,
-      ""
-    );
-
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
 }
 
 
@@ -696,34 +602,25 @@ function criarPKCE() {
 
   const codeVerifier =
     base64URL(
-      crypto.randomBytes(
-        48
-      )
+      crypto.randomBytes(48)
     );
 
 
   const hash =
     crypto
-      .createHash(
-        "sha256"
-      )
-      .update(
-        codeVerifier
-      )
+      .createHash("sha256")
+      .update(codeVerifier)
       .digest();
 
 
   const codeChallenge =
-    base64URL(
-      hash
-    );
+    base64URL(hash);
 
 
   return {
     codeVerifier,
     codeChallenge
   };
-
 }
 
 
@@ -766,15 +663,12 @@ async function trocarCodePorToken(
   );
 
 
-  if (
-    codeVerifier
-  ) {
+  if (codeVerifier) {
 
     params.set(
       "code_verifier",
       codeVerifier
     );
-
   }
 
 
@@ -782,20 +676,16 @@ async function trocarCodePorToken(
     await fetch(
       "https://api.mercadolibre.com/oauth/token",
       {
-
         method:
           "POST",
 
         headers: {
-
           "Content-Type":
             "application/x-www-form-urlencoded"
-
         },
 
         body:
           params
-
       }
     );
 
@@ -804,16 +694,13 @@ async function trocarCodePorToken(
     await resposta.json();
 
 
-  if (
-    !resposta.ok
-  ) {
+  if (!resposta.ok) {
 
     throw new Error(
       dados?.message ||
       dados?.error ||
       "Erro ao obter token."
     );
-
   }
 
 
@@ -837,7 +724,6 @@ async function trocarCodePorToken(
         ) *
         1000
       )
-
   };
 
 
@@ -848,7 +734,6 @@ async function trocarCodePorToken(
 
 
   return token;
-
 }
 
 
@@ -873,28 +758,23 @@ function criarAssinaturaShopee(
 
   const signature =
     crypto
-      .createHash(
-        "sha256"
-      )
+      .createHash("sha256")
       .update(
         base,
         "utf8"
       )
-      .digest(
-        "hex"
-      );
+      .digest("hex");
 
 
   return {
     timestamp,
     signature
   };
-
 }
 
 
 // ======================================================
-// SHOPEE - CONSULTA GRAPHQL
+// SHOPEE - CONSULTA
 // ======================================================
 
 async function consultarShopee(
@@ -902,25 +782,19 @@ async function consultarShopee(
   variables = {}
 ) {
 
-  if (
-    !SHOPEE_APP_ID
-  ) {
+  if (!SHOPEE_APP_ID) {
 
     throw new Error(
       "SHOPEE_APP_ID não configurado."
     );
-
   }
 
 
-  if (
-    !SHOPEE_SECRET
-  ) {
+  if (!SHOPEE_SECRET) {
 
     throw new Error(
       "SHOPEE_SECRET não configurado."
     );
-
   }
 
 
@@ -948,23 +822,19 @@ async function consultarShopee(
     await fetch(
       SHOPEE_ENDPOINT,
       {
-
         method:
           "POST",
 
         headers: {
-
           "Content-Type":
             "application/json",
 
           "Authorization":
             authorization
-
         },
 
         body:
           payload
-
       }
     );
 
@@ -979,10 +849,7 @@ async function consultarShopee(
   try {
 
     dados =
-      JSON.parse(
-        texto
-      );
-
+      JSON.parse(texto);
   }
 
   catch {
@@ -990,23 +857,18 @@ async function consultarShopee(
     throw new Error(
       `Shopee respondeu HTTP ${resposta.status}, mas não retornou JSON.`
     );
-
   }
 
 
-  if (
-    !resposta.ok
-  ) {
+  if (!resposta.ok) {
 
     throw new Error(
       `Shopee HTTP ${resposta.status}: ${texto}`
     );
-
   }
 
 
   return dados;
-
 }
 
 
@@ -1059,11 +921,8 @@ async function testarShopee() {
     await consultarShopee(
       QUERY_PRODUTOS_SHOPEE,
       {
-        page:
-          1,
-
-        limit:
-          1
+        page: 1,
+        limit: 1
       }
     );
 
@@ -1073,15 +932,10 @@ async function testarShopee() {
   ) {
 
     return {
-
-      sucesso:
-        false,
-
+      sucesso: false,
       errors:
         resposta.errors
-
     };
-
   }
 
 
@@ -1107,27 +961,21 @@ async function testarShopee() {
 
     produto_teste:
       produto
-
   };
-
 }
 
 
 // ======================================================
-// SHOPEE - TEXTO NORMALIZADO
+// TEXTO NORMALIZADO
 // ======================================================
 
-function normalizarTexto(
-  texto
-) {
+function normalizarTexto(texto) {
 
   return String(
     texto ||
     ""
   )
-    .normalize(
-      "NFD"
-    )
+    .normalize("NFD")
     .replace(
       /[\u0300-\u036f]/g,
       ""
@@ -1142,12 +990,11 @@ function normalizarTexto(
       " "
     )
     .trim();
-
 }
 
 
 // ======================================================
-// SHOPEE - PALAVRAS DO PRODUTO
+// PALAVRAS PRODUTO
 // ======================================================
 
 const PALAVRAS_IGNORADAS =
@@ -1179,30 +1026,22 @@ const PALAVRAS_IGNORADAS =
   ]);
 
 
-function palavrasProduto(
-  titulo
-) {
+function palavrasProduto(titulo) {
 
-  return normalizarTexto(
-    titulo
-  )
-    .split(
-      " "
-    )
+  return normalizarTexto(titulo)
+    .split(" ")
     .filter(
       palavra =>
-        palavra.length >=
-          4 &&
+        palavra.length >= 4 &&
         !PALAVRAS_IGNORADAS.has(
           palavra
         )
     );
-
 }
 
 
 // ======================================================
-// SHOPEE - SIMILARIDADE DE TÍTULOS
+// SIMILARIDADE
 // ======================================================
 
 function similaridadeTitulos(
@@ -1232,7 +1071,6 @@ function similaridadeTitulos(
   ) {
 
     return 0;
-
   }
 
 
@@ -1241,20 +1079,15 @@ function similaridadeTitulos(
 
 
   for (
-    const palavra of
-    a
+    const palavra of a
   ) {
 
     if (
-      b.has(
-        palavra
-      )
+      b.has(palavra)
     ) {
 
       iguais++;
-
     }
-
   }
 
 
@@ -1268,17 +1101,14 @@ function similaridadeTitulos(
   return uniao > 0
     ? iguais / uniao
     : 0;
-
 }
 
 
 // ======================================================
-// SHOPEE - GRUPO DO PRODUTO
+// GRUPO PRODUTO
 // ======================================================
 
-function descobrirGrupoProduto(
-  titulo
-) {
+function descobrirGrupoProduto(titulo) {
 
   const t =
     normalizarTexto(
@@ -1442,13 +1272,11 @@ function descobrirGrupoProduto(
         "bicicleta ergometrica"
       ]
     }
-
   ];
 
 
   for (
-    const grupo of
-    grupos
+    const grupo of grupos
   ) {
 
     if (
@@ -1461,24 +1289,19 @@ function descobrirGrupoProduto(
     ) {
 
       return grupo.nome;
-
     }
-
   }
 
 
   return null;
-
 }
 
 
 // ======================================================
-// SHOPEE - ITENS GRANDES/POUCO INTERESSANTES
+// PRODUTO INDESEJADO
 // ======================================================
 
-function produtoIndesejado(
-  titulo
-) {
+function produtoIndesejado(titulo) {
 
   const t =
     normalizarTexto(
@@ -1487,7 +1310,6 @@ function produtoIndesejado(
 
 
   const bloqueados = [
-
     "geladeira",
     "refrigerador",
     "freezer",
@@ -1503,7 +1325,6 @@ function produtoIndesejado(
     "painel tv",
     "armario cozinha completo",
     "balcao cozinha completo"
-
   ];
 
 
@@ -1513,17 +1334,14 @@ function produtoIndesejado(
         termo
       )
   );
-
 }
 
 
 // ======================================================
-// SHOPEE - CALCULAR COMISSÃO EM %
+// COMISSÃO %
 // ======================================================
 
-function obterComissaoPercentual(
-  valor
-) {
+function obterComissaoPercentual(valor) {
 
   const numero =
     Number(
@@ -1539,7 +1357,6 @@ function obterComissaoPercentual(
   ) {
 
     return 0;
-
   }
 
 
@@ -1547,19 +1364,16 @@ function obterComissaoPercentual(
     numero <= 1
   ) {
 
-    return numero *
-      100;
-
+    return numero * 100;
   }
 
 
   return numero;
-
 }
 
 
 // ======================================================
-// SHOPEE - CALCULAR PREÇO ANTIGO
+// PREÇO ORIGINAL
 // ======================================================
 
 function calcularPrecoOriginal(
@@ -1568,31 +1382,21 @@ function calcularPrecoOriginal(
 ) {
 
   const atual =
-    Number(
-      precoAtual
-    );
-
+    Number(precoAtual);
 
   const percentual =
-    Number(
-      desconto
-    );
+    Number(desconto);
 
 
   if (
-    !Number.isFinite(
-      atual
-    ) ||
-    !Number.isFinite(
-      percentual
-    ) ||
+    !Number.isFinite(atual) ||
+    !Number.isFinite(percentual) ||
     atual <= 0 ||
     percentual <= 0 ||
     percentual >= 90
   ) {
 
     return 0;
-
   }
 
 
@@ -1600,34 +1404,26 @@ function calcularPrecoOriginal(
     atual /
     (
       1 -
-      (
-        percentual /
-        100
-      )
+      percentual / 100
     );
 
 
   if (
-    original <=
-    atual
+    original <= atual
   ) {
 
     return 0;
-
   }
 
 
   return Number(
-    original.toFixed(
-      2
-    )
+    original.toFixed(2)
   );
-
 }
 
 
 // ======================================================
-// SHOPEE - NOTA DA OFERTA
+// PONTUAÇÃO SHOPEE
 // ======================================================
 
 function calcularPontuacaoShopee(
@@ -1690,46 +1486,31 @@ function calcularPontuacaoShopee(
     );
 
 
-  // Desconto pesa bastante.
   let pontos =
-    desconto *
-    1.4;
+    desconto * 1.4;
 
 
-  // Vendas ajudam muito,
-  // mas usamos log para não deixar
-  // um produto com milhões de vendas
-  // dominar tudo.
   pontos +=
     Math.log10(
-      vendas +
-      1
+      vendas + 1
     ) *
     14;
 
 
-  // Avaliação.
   pontos +=
-    avaliacao *
-    8;
+    avaliacao * 8;
 
 
-  // Comissão.
   pontos +=
-    comissao *
-    0.7;
+    comissao * 0.7;
 
 
-  // Faixas de preço que costumam
-  // ser mais fáceis de divulgar.
   if (
     preco >= 25 &&
     preco <= 200
   ) {
 
-    pontos +=
-      18;
-
+    pontos += 18;
   }
 
   else if (
@@ -1737,9 +1518,7 @@ function calcularPontuacaoShopee(
     preco <= 500
   ) {
 
-    pontos +=
-      10;
-
+    pontos += 10;
   }
 
   else if (
@@ -1747,35 +1526,27 @@ function calcularPontuacaoShopee(
     preco <= 1000
   ) {
 
-    pontos +=
-      3;
-
+    pontos += 3;
   }
 
 
   return Number(
-    pontos.toFixed(
-      2
-    )
+    pontos.toFixed(2)
   );
-
 }
 
 
 // ======================================================
-// SHOPEE - NORMALIZAR PRODUTO DA API
+// NORMALIZAR PRODUTO SHOPEE
 // ======================================================
 
 function normalizarProdutoShopee(
   produto
 ) {
 
-  if (
-    !produto
-  ) {
+  if (!produto) {
 
     return null;
-
   }
 
 
@@ -1839,7 +1610,6 @@ function normalizarProdutoShopee(
   ) {
 
     return null;
-
   }
 
 
@@ -1910,7 +1680,6 @@ function normalizarProdutoShopee(
       descobrirGrupoProduto(
         titulo
       )
-
   };
 
 
@@ -1921,12 +1690,11 @@ function normalizarProdutoShopee(
 
 
   return oferta;
-
 }
 
 
 // ======================================================
-// SHOPEE - BUSCAR CANDIDATOS
+// BUSCAR CANDIDATOS SHOPEE
 // ======================================================
 
 async function buscarCandidatosShopee(
@@ -1944,29 +1712,20 @@ async function buscarCandidatosShopee(
     );
 
 
-  const candidatos =
-    [];
-
+  const candidatos = [];
 
   const ids =
     new Set();
 
+  const POR_PAGINA = 20;
 
-  const POR_PAGINA =
-    20;
+  let pagina = 1;
 
-
-  let pagina =
-    1;
-
-
-  let temProxima =
-    true;
+  let temProxima = true;
 
 
   while (
-    candidatos.length <
-      alvo &&
+    candidatos.length < alvo &&
     pagina <= 5 &&
     temProxima
   ) {
@@ -1975,13 +1734,11 @@ async function buscarCandidatosShopee(
       await consultarShopee(
         QUERY_PRODUTOS_SHOPEE,
         {
-
           page:
             pagina,
 
           limit:
             POR_PAGINA
-
         }
       );
 
@@ -1995,7 +1752,6 @@ async function buscarCandidatosShopee(
           resposta.errors
         )
       );
-
     }
 
 
@@ -2006,26 +1762,22 @@ async function buscarCandidatosShopee(
 
 
     const produtos =
-      bloco
-        ?.nodes;
+      bloco?.nodes;
 
 
     if (
       !Array.isArray(
         produtos
       ) ||
-      produtos.length ===
-        0
+      produtos.length === 0
     ) {
 
       break;
-
     }
 
 
     for (
-      const bruto of
-      produtos
+      const bruto of produtos
     ) {
 
       const produto =
@@ -2034,12 +1786,9 @@ async function buscarCandidatosShopee(
         );
 
 
-      if (
-        !produto
-      ) {
+      if (!produto) {
 
         continue;
-
       }
 
 
@@ -2051,18 +1800,14 @@ async function buscarCandidatosShopee(
       ) {
 
         continue;
-
       }
 
 
-      if (
-        produto.id
-      ) {
+      if (produto.id) {
 
         ids.add(
           produto.id
         );
-
       }
 
 
@@ -2072,14 +1817,11 @@ async function buscarCandidatosShopee(
 
 
       if (
-        candidatos.length >=
-        alvo
+        candidatos.length >= alvo
       ) {
 
         break;
-
       }
-
     }
 
 
@@ -2091,17 +1833,15 @@ async function buscarCandidatosShopee(
 
 
     pagina++;
-
   }
 
 
   return candidatos;
-
 }
 
 
 // ======================================================
-// SHOPEE - PRODUTO ACEITÁVEL
+// PRODUTO ACEITÁVEL
 // ======================================================
 
 function produtoAceitavel(
@@ -2109,12 +1849,9 @@ function produtoAceitavel(
   flexivel = false
 ) {
 
-  if (
-    !produto
-  ) {
+  if (!produto) {
 
     return false;
-
   }
 
 
@@ -2125,7 +1862,6 @@ function produtoAceitavel(
   ) {
 
     return false;
-
   }
 
 
@@ -2137,13 +1873,10 @@ function produtoAceitavel(
   ) {
 
     return false;
-
   }
 
 
-  if (
-    !flexivel
-  ) {
+  if (!flexivel) {
 
     if (
       produto.desconto <
@@ -2151,31 +1884,26 @@ function produtoAceitavel(
     ) {
 
       return false;
-
     }
 
 
     if (
-      produto.avaliacao >
-        0 &&
+      produto.avaliacao > 0 &&
       produto.avaliacao <
         SHOPEE_AVALIACAO_MINIMA
     ) {
 
       return false;
-
     }
-
   }
 
 
   return true;
-
 }
 
 
 // ======================================================
-// SHOPEE - MUITO PARECIDO COM JÁ SELECIONADO
+// SIMILARIDADE
 // ======================================================
 
 function muitoParecido(
@@ -2184,8 +1912,7 @@ function muitoParecido(
 ) {
 
   for (
-    const escolhido of
-    selecionados
+    const escolhido of selecionados
   ) {
 
     const similaridade =
@@ -2196,24 +1923,20 @@ function muitoParecido(
 
 
     if (
-      similaridade >=
-      0.42
+      similaridade >= 0.42
     ) {
 
       return true;
-
     }
-
   }
 
 
   return false;
-
 }
 
 
 // ======================================================
-// SHOPEE - SELEÇÃO INTELIGENTE
+// SELEÇÃO SHOPEE
 // ======================================================
 
 function selecionarMelhoresShopee(
@@ -2226,35 +1949,25 @@ function selecionarMelhoresShopee(
       ...candidatos
     ]
       .sort(
-        (
-          a,
-          b
-        ) =>
+        (a, b) =>
           b.pontuacao -
           a.pontuacao
       );
 
 
-  const selecionados =
-    [];
-
+  const selecionados = [];
 
   const gruposUsados =
     new Map();
-
 
   const ids =
     new Set();
 
 
-  // ==================================================
-  // PRIMEIRA PASSAGEM
-  // Mais exigente e prioriza variedade.
-  // ==================================================
+  // Primeira passagem
 
   for (
-    const produto of
-    ordenados
+    const produto of ordenados
   ) {
 
     if (
@@ -2263,7 +1976,6 @@ function selecionarMelhoresShopee(
     ) {
 
       break;
-
     }
 
 
@@ -2275,7 +1987,6 @@ function selecionarMelhoresShopee(
     ) {
 
       continue;
-
     }
 
 
@@ -2287,7 +1998,6 @@ function selecionarMelhoresShopee(
     ) {
 
       continue;
-
     }
 
 
@@ -2299,31 +2009,23 @@ function selecionarMelhoresShopee(
     ) {
 
       continue;
-
     }
 
 
-    if (
-      produto.grupo
-    ) {
+    if (produto.grupo) {
 
       const usados =
         gruposUsados.get(
           produto.grupo
-        ) ||
-        0;
+        ) || 0;
 
 
-      // Na primeira rodada,
-      // no máximo 1 produto de cada grupo.
       if (
         usados >= 1
       ) {
 
         continue;
-
       }
-
     }
 
 
@@ -2332,41 +2034,29 @@ function selecionarMelhoresShopee(
     );
 
 
-    if (
-      produto.id
-    ) {
+    if (produto.id) {
 
       ids.add(
         produto.id
       );
-
     }
 
 
-    if (
-      produto.grupo
-    ) {
+    if (produto.grupo) {
 
       gruposUsados.set(
         produto.grupo,
         (
           gruposUsados.get(
             produto.grupo
-          ) ||
-          0
-        ) +
-        1
+          ) || 0
+        ) + 1
       );
-
     }
-
   }
 
 
-  // ==================================================
-  // SEGUNDA PASSAGEM
-  // Se faltou produto, permite até 2 do mesmo grupo.
-  // ==================================================
+  // Segunda passagem
 
   if (
     selecionados.length <
@@ -2374,8 +2064,7 @@ function selecionarMelhoresShopee(
   ) {
 
     for (
-      const produto of
-      ordenados
+      const produto of ordenados
     ) {
 
       if (
@@ -2384,7 +2073,6 @@ function selecionarMelhoresShopee(
       ) {
 
         break;
-
       }
 
 
@@ -2396,7 +2084,6 @@ function selecionarMelhoresShopee(
       ) {
 
         continue;
-
       }
 
 
@@ -2408,7 +2095,6 @@ function selecionarMelhoresShopee(
       ) {
 
         continue;
-
       }
 
 
@@ -2420,19 +2106,15 @@ function selecionarMelhoresShopee(
       ) {
 
         continue;
-
       }
 
 
-      if (
-        produto.grupo
-      ) {
+      if (produto.grupo) {
 
         const usados =
           gruposUsados.get(
             produto.grupo
-          ) ||
-          0;
+          ) || 0;
 
 
         if (
@@ -2440,9 +2122,7 @@ function selecionarMelhoresShopee(
         ) {
 
           continue;
-
         }
-
       }
 
 
@@ -2451,43 +2131,30 @@ function selecionarMelhoresShopee(
       );
 
 
-      if (
-        produto.id
-      ) {
+      if (produto.id) {
 
         ids.add(
           produto.id
         );
-
       }
 
 
-      if (
-        produto.grupo
-      ) {
+      if (produto.grupo) {
 
         gruposUsados.set(
           produto.grupo,
           (
             gruposUsados.get(
               produto.grupo
-            ) ||
-            0
-          ) +
-          1
+            ) || 0
+          ) + 1
         );
-
       }
-
     }
-
   }
 
 
-  // ==================================================
-  // TERCEIRA PASSAGEM
-  // Mais flexível para conseguir completar a quantidade.
-  // ==================================================
+  // Terceira passagem
 
   if (
     selecionados.length <
@@ -2495,8 +2162,7 @@ function selecionarMelhoresShopee(
   ) {
 
     for (
-      const produto of
-      ordenados
+      const produto of ordenados
     ) {
 
       if (
@@ -2505,7 +2171,6 @@ function selecionarMelhoresShopee(
       ) {
 
         break;
-
       }
 
 
@@ -2517,7 +2182,6 @@ function selecionarMelhoresShopee(
       ) {
 
         continue;
-
       }
 
 
@@ -2529,7 +2193,6 @@ function selecionarMelhoresShopee(
       ) {
 
         continue;
-
       }
 
 
@@ -2541,7 +2204,6 @@ function selecionarMelhoresShopee(
       ) {
 
         continue;
-
       }
 
 
@@ -2550,25 +2212,17 @@ function selecionarMelhoresShopee(
       );
 
 
-      if (
-        produto.id
-      ) {
+      if (produto.id) {
 
         ids.add(
           produto.id
         );
-
       }
-
     }
-
   }
 
 
-  // ==================================================
-  // ÚLTIMA PASSAGEM
-  // Se ainda não completou, usa os restantes válidos.
-  // ==================================================
+  // Última passagem
 
   if (
     selecionados.length <
@@ -2576,8 +2230,7 @@ function selecionarMelhoresShopee(
   ) {
 
     for (
-      const produto of
-      ordenados
+      const produto of ordenados
     ) {
 
       if (
@@ -2586,7 +2239,6 @@ function selecionarMelhoresShopee(
       ) {
 
         break;
-
       }
 
 
@@ -2598,7 +2250,6 @@ function selecionarMelhoresShopee(
       ) {
 
         continue;
-
       }
 
 
@@ -2609,7 +2260,6 @@ function selecionarMelhoresShopee(
       ) {
 
         continue;
-
       }
 
 
@@ -2618,18 +2268,13 @@ function selecionarMelhoresShopee(
       );
 
 
-      if (
-        produto.id
-      ) {
+      if (produto.id) {
 
         ids.add(
           produto.id
         );
-
       }
-
     }
-
   }
 
 
@@ -2640,9 +2285,6 @@ function selecionarMelhoresShopee(
     )
     .map(
       produto => {
-
-        // Retira informações internas
-        // que não precisam ir para a extensão.
 
         const {
           grupo,
@@ -2659,17 +2301,14 @@ function selecionarMelhoresShopee(
 
           score:
             pontuacao
-
         };
-
       }
     );
-
 }
 
 
 // ======================================================
-// SHOPEE - BUSCAR OFERTAS FINAIS
+// OFERTAS SHOPEE
 // ======================================================
 
 async function buscarOfertasShopee(
@@ -2721,9 +2360,7 @@ async function buscarOfertasShopee(
 
     ofertas:
       selecionados
-
   };
-
 }
 
 
@@ -2736,14 +2373,11 @@ function formatarDestino(
   tipo
 ) {
 
-  if (
-    !destino
-  ) {
+  if (!destino) {
 
     throw new Error(
       "Destino não informado."
     );
-
   }
 
 
@@ -2765,14 +2399,12 @@ function formatarDestino(
     ) {
 
       return valor;
-
     }
 
 
     throw new Error(
       "ID de grupo inválido."
     );
-
   }
 
 
@@ -2786,8 +2418,713 @@ function formatarDestino(
   return (
     `${numero}@s.whatsapp.net`
   );
-
 }
+
+
+// ======================================================
+// DISPARADOR AUTOMÁTICO
+// ======================================================
+
+function configuracaoPadraoDisparador() {
+
+  return {
+
+    ativo:
+      false,
+
+    pausado:
+      false,
+
+    finalizado:
+      false,
+
+    destino:
+      null,
+
+    tipo:
+      "grupo",
+
+    intervalo_segundos:
+      INTERVALO_PADRAO_SEGUNDOS,
+
+    total:
+      0,
+
+    enviados:
+      0,
+
+    iniciado_em:
+      null,
+
+    proximo_disparo_em:
+      null,
+
+    ultimo_disparo_em:
+      null,
+
+    ultimo_erro:
+      null
+  };
+}
+
+
+function carregarDisparador() {
+
+  const salvo =
+    lerJSON(
+      DISPARADOR_FILE
+    );
+
+
+  const padrao =
+    configuracaoPadraoDisparador();
+
+
+  if (
+    !salvo ||
+    typeof salvo !==
+      "object"
+  ) {
+
+    return padrao;
+  }
+
+
+  return {
+    ...padrao,
+    ...salvo
+  };
+}
+
+
+function salvarDisparador(
+  config
+) {
+
+  salvarJSON(
+    DISPARADOR_FILE,
+    config
+  );
+}
+
+
+function resetarDisparador() {
+
+  const config =
+    configuracaoPadraoDisparador();
+
+
+  salvarDisparador(
+    config
+  );
+
+
+  return config;
+}
+
+
+function segundosAteProximo(
+  config
+) {
+
+  if (
+    !config?.ativo ||
+    config?.pausado ||
+    !config?.proximo_disparo_em
+  ) {
+
+    return null;
+  }
+
+
+  const alvo =
+    new Date(
+      config.proximo_disparo_em
+    ).getTime();
+
+
+  if (
+    !Number.isFinite(
+      alvo
+    )
+  ) {
+
+    return null;
+  }
+
+
+  return Math.max(
+    0,
+    Math.ceil(
+      (
+        alvo -
+        Date.now()
+      ) /
+      1000
+    )
+  );
+}
+
+
+function resumoDisparador() {
+
+  const config =
+    carregarDisparador();
+
+
+  const fila =
+    carregarFila();
+
+
+  const pendentes =
+    fila.filter(
+      item =>
+        item.status ===
+        "pendente"
+    ).length;
+
+
+  return {
+
+    ...config,
+
+    pendentes,
+
+    segundos_restantes:
+      segundosAteProximo(
+        config
+      )
+  };
+}
+
+
+// ======================================================
+// MENSAGEM DA OFERTA
+// ======================================================
+
+function formatarMensagemOferta(
+  oferta
+) {
+
+  const marketplace =
+    String(
+      oferta?.marketplace ||
+      ""
+    )
+      .trim()
+      .toUpperCase();
+
+
+  let plataforma =
+    marketplace;
+
+
+  if (
+    marketplace ===
+    "MERCADOLIVRE"
+  ) {
+
+    plataforma =
+      "MERCADO LIVRE";
+  }
+
+
+  let texto =
+    `🔥 OFERTA ${plataforma} 🔥\n\n`;
+
+
+  texto +=
+    `📦 ${oferta?.titulo || ""}\n\n`;
+
+
+  const precoAtual =
+    Number(
+      oferta?.preco_numerico ||
+      0
+    );
+
+
+  const precoOriginal =
+    Number(
+      oferta?.preco_original_numerico ||
+      0
+    );
+
+
+  if (
+    oferta?.preco_original &&
+    precoOriginal >
+      precoAtual
+  ) {
+
+    texto +=
+      `❌ De: ~R$ ${oferta.preco_original}~\n`;
+  }
+
+
+  if (
+    oferta?.preco
+  ) {
+
+    texto +=
+      `💥 Por: R$ ${oferta.preco}\n\n`;
+  }
+
+
+  texto +=
+    "Clique aqui\n";
+
+
+  texto +=
+    `👉 ${oferta?.link || ""}`;
+
+
+  return texto;
+}
+
+
+// ======================================================
+// ENVIAR OFERTA
+// ======================================================
+
+async function enviarOfertaWhatsApp(
+  oferta,
+  destino,
+  tipo = "grupo"
+) {
+
+  if (
+    !sock ||
+    !conectado
+  ) {
+
+    throw new Error(
+      "WhatsApp não conectado."
+    );
+  }
+
+
+  const jid =
+    formatarDestino(
+      destino,
+      tipo
+    );
+
+
+  const mensagem =
+    formatarMensagemOferta(
+      oferta
+    );
+
+
+  const imagem =
+    String(
+      oferta?.imagem ||
+      ""
+    ).trim();
+
+
+  if (imagem) {
+
+    try {
+
+      return await sock.sendMessage(
+        jid,
+        {
+
+          image: {
+            url:
+              imagem
+          },
+
+          caption:
+            mensagem
+        }
+      );
+    }
+
+    catch (
+      erroImagem
+    ) {
+
+      console.error(
+        "Falha ao enviar imagem. Tentando texto:",
+        erroImagem?.message ||
+        erroImagem
+      );
+    }
+  }
+
+
+  return await sock.sendMessage(
+    jid,
+    {
+
+      text:
+        mensagem
+    }
+  );
+}
+
+
+// ======================================================
+// PROCESSAR DISPARADOR
+// ======================================================
+
+let processandoDisparo =
+  false;
+
+
+async function processarDisparadorAutomatico() {
+
+  if (
+    processandoDisparo
+  ) {
+
+    return;
+  }
+
+
+  const config =
+    carregarDisparador();
+
+
+  if (
+    !config.ativo ||
+    config.pausado ||
+    config.finalizado
+  ) {
+
+    return;
+  }
+
+
+  if (!config.destino) {
+
+    config.ativo =
+      false;
+
+    config.ultimo_erro =
+      "Destino do WhatsApp não configurado.";
+
+    salvarDisparador(
+      config
+    );
+
+    return;
+  }
+
+
+  const agora =
+    Date.now();
+
+
+  const proximo =
+    config.proximo_disparo_em
+      ? new Date(
+          config.proximo_disparo_em
+        ).getTime()
+      : 0;
+
+
+  if (
+    Number.isFinite(
+      proximo
+    ) &&
+    proximo > agora
+  ) {
+
+    return;
+  }
+
+
+  processandoDisparo =
+    true;
+
+
+  try {
+
+    const fila =
+      carregarFila();
+
+
+    const indice =
+      fila.findIndex(
+        item =>
+          item.status ===
+          "pendente"
+      );
+
+
+    if (
+      indice === -1
+    ) {
+
+      config.ativo =
+        false;
+
+      config.finalizado =
+        true;
+
+      config.proximo_disparo_em =
+        null;
+
+      config.ultimo_erro =
+        null;
+
+
+      salvarDisparador(
+        config
+      );
+
+
+      console.log(
+        "Disparador finalizado: fila sem pendências."
+      );
+
+
+      return;
+    }
+
+
+    const oferta =
+      fila[indice];
+
+
+    oferta.status =
+      "enviando";
+
+
+    salvarFila(
+      fila
+    );
+
+
+    try {
+
+      await enviarOfertaWhatsApp(
+        oferta,
+        config.destino,
+        config.tipo
+      );
+
+
+      oferta.status =
+        "enviado";
+
+      oferta.enviado_em =
+        new Date()
+          .toISOString();
+
+      oferta.erro_envio =
+        null;
+
+
+      config.enviados =
+        Number(
+          config.enviados ||
+          0
+        ) + 1;
+
+
+      config.ultimo_disparo_em =
+        new Date()
+          .toISOString();
+
+
+      config.ultimo_erro =
+        null;
+
+
+      const aindaPendentes =
+        fila.some(
+          (
+            item,
+            i
+          ) =>
+            i !== indice &&
+            item.status ===
+              "pendente"
+        );
+
+
+      if (
+        aindaPendentes
+      ) {
+
+        config.proximo_disparo_em =
+          new Date(
+            Date.now() +
+            (
+              Number(
+                config.intervalo_segundos ||
+                INTERVALO_PADRAO_SEGUNDOS
+              ) *
+              1000
+            )
+          )
+            .toISOString();
+      }
+
+      else {
+
+        config.ativo =
+          false;
+
+        config.finalizado =
+          true;
+
+        config.proximo_disparo_em =
+          null;
+      }
+
+
+      salvarFila(
+        fila
+      );
+
+
+      salvarDisparador(
+        config
+      );
+
+
+      console.log(
+        `Oferta enviada automaticamente: ${config.enviados}/${config.total}`
+      );
+    }
+
+    catch (erro) {
+
+      oferta.status =
+        "pendente";
+
+      oferta.erro_envio =
+        erro.message;
+
+
+      config.ultimo_erro =
+        erro.message;
+
+
+      config.proximo_disparo_em =
+        new Date(
+          Date.now() +
+          (
+            Number(
+              config.intervalo_segundos ||
+              INTERVALO_PADRAO_SEGUNDOS
+            ) *
+            1000
+          )
+        )
+          .toISOString();
+
+
+      salvarFila(
+        fila
+      );
+
+
+      salvarDisparador(
+        config
+      );
+
+
+      console.error(
+        "Erro no disparo automático:",
+        erro
+      );
+    }
+  }
+
+  finally {
+
+    processandoDisparo =
+      false;
+  }
+}
+
+
+// ======================================================
+// PREPARAR DISPARADOR
+// ======================================================
+
+if (
+  !fs.existsSync(
+    DISPARADOR_FILE
+  )
+) {
+
+  resetarDisparador();
+}
+
+
+// Se o servidor reiniciar no meio de um envio,
+// devolve o produto para pendente.
+
+{
+  const filaInicial =
+    carregarFila();
+
+  let alterou =
+    false;
+
+
+  for (
+    const item of filaInicial
+  ) {
+
+    if (
+      item.status ===
+      "enviando"
+    ) {
+
+      item.status =
+        "pendente";
+
+      alterou =
+        true;
+    }
+  }
+
+
+  if (alterou) {
+
+    salvarFila(
+      filaInicial
+    );
+  }
+}
+
+
+// ======================================================
+// INICIAR WHATSAPP
+// ======================================================
+
+await iniciarWhatsApp();
+
+
+// ======================================================
+// LOOP DO DISPARADOR
+// ======================================================
+
+setInterval(
+  () => {
+
+    processarDisparadorAutomatico()
+      .catch(
+        erro => {
+
+          console.error(
+            "Erro no ciclo do disparador:",
+            erro
+          );
+        }
+      );
+  },
+  1000
+);
 
 
 // ======================================================
@@ -2822,7 +3159,6 @@ const server =
         res.end();
 
         return;
-
       }
 
 
@@ -2892,14 +3228,15 @@ const server =
                 item =>
                   item.status ===
                   "pendente"
-              ).length
+              ).length,
 
+            disparador:
+              resumoDisparador()
           }
         );
 
 
         return;
-
       }
 
 
@@ -2927,12 +3264,9 @@ const server =
               : 400,
             resultado
           );
-
         }
 
-        catch (
-          erro
-        ) {
+        catch (erro) {
 
           console.error(
             "Erro teste Shopee:",
@@ -2950,15 +3284,12 @@ const server =
 
               erro:
                 erro.message
-
             }
           );
-
         }
 
 
         return;
-
       }
 
 
@@ -3022,15 +3353,11 @@ const server =
 
               ofertas:
                 resultado.ofertas
-
             }
           );
-
         }
 
-        catch (
-          erro
-        ) {
+        catch (erro) {
 
           console.error(
             "Erro ofertas Shopee:",
@@ -3048,15 +3375,12 @@ const server =
 
               erro:
                 erro.message
-
             }
           );
-
         }
 
 
         return;
-
       }
 
 
@@ -3081,18 +3405,13 @@ const server =
             throw new Error(
               "Mercado Livre não configurado."
             );
-
           }
 
 
           const state =
             crypto
-              .randomBytes(
-                24
-              )
-              .toString(
-                "hex"
-              );
+              .randomBytes(24)
+              .toString("hex");
 
 
           const {
@@ -3112,7 +3431,6 @@ const server =
 
               criado_em:
                 Date.now()
-
             }
           );
 
@@ -3181,12 +3499,9 @@ const server =
 
 
           res.end();
-
         }
 
-        catch (
-          erro
-        ) {
+        catch (erro) {
 
           responderJSON(
             res,
@@ -3198,15 +3513,12 @@ const server =
 
               erro:
                 erro.message
-
             }
           );
-
         }
 
 
         return;
-
       }
 
 
@@ -3251,7 +3563,6 @@ const server =
             throw new Error(
               "Falha na autorização."
             );
-
           }
 
 
@@ -3287,12 +3598,9 @@ const server =
             </body>
             `
           );
-
         }
 
-        catch (
-          erro
-        ) {
+        catch (erro) {
 
           responderJSON(
             res,
@@ -3304,15 +3612,12 @@ const server =
 
               erro:
                 erro.message
-
             }
           );
-
         }
 
 
         return;
-
       }
 
 
@@ -3343,13 +3648,11 @@ const server =
 
               erro:
                 "Chave inválida."
-
             }
           );
 
 
           return;
-
         }
 
 
@@ -3377,13 +3680,11 @@ const server =
 
             ofertas:
               fila
-
           }
         );
 
 
         return;
-
       }
 
 
@@ -3416,13 +3717,11 @@ const server =
 
                 erro:
                   "Chave inválida."
-
               }
             );
 
 
             return;
-
           }
 
 
@@ -3432,8 +3731,7 @@ const server =
             );
 
 
-          let recebidas =
-            [];
+          let recebidas = [];
 
 
           if (
@@ -3444,30 +3742,25 @@ const server =
 
             recebidas =
               body.ofertas;
-
           }
 
           else if (
             body.oferta
           ) {
 
-            recebidas =
-              [
-                body.oferta
-              ];
-
+            recebidas = [
+              body.oferta
+            ];
           }
 
 
           if (
-            recebidas.length ===
-            0
+            recebidas.length === 0
           ) {
 
             throw new Error(
               "Nenhuma oferta recebida."
             );
-
           }
 
 
@@ -3480,8 +3773,7 @@ const server =
 
 
           for (
-            const item of
-            fila
+            const item of fila
           ) {
 
             if (
@@ -3491,7 +3783,6 @@ const server =
               existentes.add(
                 `${item.marketplace}:id:${item.produto_id}`
               );
-
             }
 
 
@@ -3502,25 +3793,19 @@ const server =
               existentes.add(
                 `${item.marketplace}:link:${item.link}`
               );
-
             }
-
           }
 
 
-          let adicionadas =
-            0;
+          let adicionadas = 0;
 
-          let repetidas =
-            0;
+          let repetidas = 0;
 
-          let invalidas =
-            0;
+          let invalidas = 0;
 
 
           for (
-            const recebida of
-            recebidas
+            const recebida of recebidas
           ) {
 
             const oferta =
@@ -3529,14 +3814,11 @@ const server =
               );
 
 
-            if (
-              !oferta
-            ) {
+            if (!oferta) {
 
               invalidas++;
 
               continue;
-
             }
 
 
@@ -3565,7 +3847,6 @@ const server =
               repetidas++;
 
               continue;
-
             }
 
 
@@ -3574,14 +3855,11 @@ const server =
             );
 
 
-            if (
-              chaveId
-            ) {
+            if (chaveId) {
 
               existentes.add(
                 chaveId
               );
-
             }
 
 
@@ -3591,7 +3869,6 @@ const server =
 
 
             adicionadas++;
-
           }
 
 
@@ -3619,15 +3896,11 @@ const server =
 
               total_na_fila:
                 fila.length
-
             }
           );
-
         }
 
-        catch (
-          erro
-        ) {
+        catch (erro) {
 
           responderJSON(
             res,
@@ -3639,15 +3912,12 @@ const server =
 
               erro:
                 erro.message
-
             }
           );
-
         }
 
 
         return;
-
       }
 
 
@@ -3678,19 +3948,20 @@ const server =
 
               erro:
                 "Chave inválida."
-
             }
           );
 
 
           return;
-
         }
 
 
         salvarFila(
           []
         );
+
+
+        resetarDisparador();
 
 
         responderJSON(
@@ -3703,13 +3974,567 @@ const server =
 
             mensagem:
               "Fila limpa."
-
           }
         );
 
 
         return;
+      }
 
+
+// ======================================================
+// DISPARADOR - STATUS
+// ======================================================
+
+      if (
+        req.method ===
+          "GET" &&
+        caminho ===
+          "/disparador/status"
+      ) {
+
+        if (
+          !chaveValida(
+            req
+          )
+        ) {
+
+          responderJSON(
+            res,
+            401,
+            {
+
+              sucesso:
+                false,
+
+              erro:
+                "Chave inválida."
+            }
+          );
+
+
+          return;
+        }
+
+
+        responderJSON(
+          res,
+          200,
+          {
+
+            sucesso:
+              true,
+
+            disparador:
+              resumoDisparador()
+          }
+        );
+
+
+        return;
+      }
+
+
+// ======================================================
+// DISPARADOR - INICIAR
+// ======================================================
+
+      if (
+        req.method ===
+          "POST" &&
+        caminho ===
+          "/disparador/iniciar"
+      ) {
+
+        try {
+
+          if (
+            !chaveValida(
+              req
+            )
+          ) {
+
+            responderJSON(
+              res,
+              401,
+              {
+
+                sucesso:
+                  false,
+
+                erro:
+                  "Chave inválida."
+              }
+            );
+
+
+            return;
+          }
+
+
+          if (
+            !sock ||
+            !conectado
+          ) {
+
+            throw new Error(
+              "WhatsApp não conectado."
+            );
+          }
+
+
+          const body =
+            await lerBodyJSON(
+              req
+            );
+
+
+          const destino =
+            String(
+              body.destino ||
+              ""
+            ).trim();
+
+
+          if (!destino) {
+
+            throw new Error(
+              "Grupo de destino não informado."
+            );
+          }
+
+
+          formatarDestino(
+            destino,
+            "grupo"
+          );
+
+
+          let intervaloSegundos =
+            Number(
+              body.intervaloSegundos ||
+              body.intervalo_segundos ||
+              INTERVALO_PADRAO_SEGUNDOS
+            );
+
+
+          if (
+            !Number.isFinite(
+              intervaloSegundos
+            )
+          ) {
+
+            intervaloSegundos =
+              INTERVALO_PADRAO_SEGUNDOS;
+          }
+
+
+          intervaloSegundos =
+            Math.max(
+              10,
+              Math.min(
+                86400,
+                Math.round(
+                  intervaloSegundos
+                )
+              )
+            );
+
+
+          const fila =
+            carregarFila();
+
+
+          const pendentes =
+            fila.filter(
+              item =>
+                item.status ===
+                "pendente"
+            ).length;
+
+
+          if (
+            pendentes === 0
+          ) {
+
+            throw new Error(
+              "Não há ofertas pendentes na fila."
+            );
+          }
+
+
+          const config = {
+
+            ...configuracaoPadraoDisparador(),
+
+            ativo:
+              true,
+
+            pausado:
+              false,
+
+            finalizado:
+              false,
+
+            destino,
+
+            tipo:
+              "grupo",
+
+            intervalo_segundos:
+              intervaloSegundos,
+
+            total:
+              pendentes,
+
+            enviados:
+              0,
+
+            iniciado_em:
+              new Date()
+                .toISOString(),
+
+            proximo_disparo_em:
+              new Date()
+                .toISOString(),
+
+            ultimo_disparo_em:
+              null,
+
+            ultimo_erro:
+              null
+          };
+
+
+          salvarDisparador(
+            config
+          );
+
+
+          responderJSON(
+            res,
+            200,
+            {
+
+              sucesso:
+                true,
+
+              mensagem:
+                "Disparador iniciado.",
+
+              disparador:
+                resumoDisparador()
+            }
+          );
+        }
+
+        catch (erro) {
+
+          responderJSON(
+            res,
+            500,
+            {
+
+              sucesso:
+                false,
+
+              erro:
+                erro.message
+            }
+          );
+        }
+
+
+        return;
+      }
+
+
+// ======================================================
+// DISPARADOR - PAUSAR
+// ======================================================
+
+      if (
+        req.method ===
+          "POST" &&
+        caminho ===
+          "/disparador/pausar"
+      ) {
+
+        if (
+          !chaveValida(
+            req
+          )
+        ) {
+
+          responderJSON(
+            res,
+            401,
+            {
+
+              sucesso:
+                false,
+
+              erro:
+                "Chave inválida."
+            }
+          );
+
+
+          return;
+        }
+
+
+        const config =
+          carregarDisparador();
+
+
+        config.ativo =
+          true;
+
+        config.pausado =
+          true;
+
+        config.finalizado =
+          false;
+
+        config.proximo_disparo_em =
+          null;
+
+
+        salvarDisparador(
+          config
+        );
+
+
+        responderJSON(
+          res,
+          200,
+          {
+
+            sucesso:
+              true,
+
+            mensagem:
+              "Disparador pausado.",
+
+            disparador:
+              resumoDisparador()
+          }
+        );
+
+
+        return;
+      }
+
+
+// ======================================================
+// DISPARADOR - CONTINUAR
+// ======================================================
+
+      if (
+        req.method ===
+          "POST" &&
+        caminho ===
+          "/disparador/continuar"
+      ) {
+
+        try {
+
+          if (
+            !chaveValida(
+              req
+            )
+          ) {
+
+            responderJSON(
+              res,
+              401,
+              {
+
+                sucesso:
+                  false,
+
+                erro:
+                  "Chave inválida."
+              }
+            );
+
+
+            return;
+          }
+
+
+          const fila =
+            carregarFila();
+
+
+          const pendentes =
+            fila.filter(
+              item =>
+                item.status ===
+                "pendente"
+            ).length;
+
+
+          if (
+            pendentes === 0
+          ) {
+
+            throw new Error(
+              "Não há ofertas pendentes para continuar."
+            );
+          }
+
+
+          const config =
+            carregarDisparador();
+
+
+          if (
+            !config.destino
+          ) {
+
+            throw new Error(
+              "Nenhum grupo configurado no disparador."
+            );
+          }
+
+
+          config.ativo =
+            true;
+
+          config.pausado =
+            false;
+
+          config.finalizado =
+            false;
+
+          config.proximo_disparo_em =
+            new Date()
+              .toISOString();
+
+          config.ultimo_erro =
+            null;
+
+
+          salvarDisparador(
+            config
+          );
+
+
+          responderJSON(
+            res,
+            200,
+            {
+
+              sucesso:
+                true,
+
+              mensagem:
+                "Disparador continuado.",
+
+              disparador:
+                resumoDisparador()
+            }
+          );
+        }
+
+        catch (erro) {
+
+          responderJSON(
+            res,
+            500,
+            {
+
+              sucesso:
+                false,
+
+              erro:
+                erro.message
+            }
+          );
+        }
+
+
+        return;
+      }
+
+
+// ======================================================
+// DISPARADOR - PARAR
+// ======================================================
+
+      if (
+        req.method ===
+          "POST" &&
+        caminho ===
+          "/disparador/parar"
+      ) {
+
+        if (
+          !chaveValida(
+            req
+          )
+        ) {
+
+          responderJSON(
+            res,
+            401,
+            {
+
+              sucesso:
+                false,
+
+              erro:
+                "Chave inválida."
+            }
+          );
+
+
+          return;
+        }
+
+
+        const config =
+          carregarDisparador();
+
+
+        config.ativo =
+          false;
+
+        config.pausado =
+          false;
+
+        config.finalizado =
+          false;
+
+        config.proximo_disparo_em =
+          null;
+
+
+        salvarDisparador(
+          config
+        );
+
+
+        responderJSON(
+          res,
+          200,
+          {
+
+            sucesso:
+              true,
+
+            mensagem:
+              "Disparador parado.",
+
+            disparador:
+              resumoDisparador()
+          }
+        );
+
+
+        return;
       }
 
 
@@ -3742,13 +4567,11 @@ const server =
 
                 erro:
                   "Chave inválida."
-
               }
             );
 
 
             return;
-
           }
 
 
@@ -3760,7 +4583,6 @@ const server =
             throw new Error(
               "WhatsApp não conectado."
             );
-
           }
 
 
@@ -3787,7 +4609,6 @@ const server =
                       .participants
                       ?.length ||
                     0
-
                 })
               );
 
@@ -3802,15 +4623,11 @@ const server =
 
               grupos:
                 lista
-
             }
           );
-
         }
 
-        catch (
-          erro
-        ) {
+        catch (erro) {
 
           responderJSON(
             res,
@@ -3822,20 +4639,17 @@ const server =
 
               erro:
                 erro.message
-
             }
           );
-
         }
 
 
         return;
-
       }
 
 
 // ======================================================
-// SEND
+// SEND MANUAL
 // ======================================================
 
       if (
@@ -3863,13 +4677,11 @@ const server =
 
                 erro:
                   "Chave inválida."
-
               }
             );
 
 
             return;
-
           }
 
 
@@ -3881,7 +4693,6 @@ const server =
             throw new Error(
               "WhatsApp não conectado."
             );
-
           }
 
 
@@ -3898,7 +4709,6 @@ const server =
             throw new Error(
               "Mensagem não informada."
             );
-
           }
 
 
@@ -3916,36 +4726,70 @@ const server =
             ).trim();
 
 
-          const conteudo =
-            imagem
-              ? {
+          let resultado;
 
-                  image: {
-                    url:
-                      imagem
-                  },
 
-                  caption:
-                    String(
-                      body.mensagem
-                    )
+          if (imagem) {
 
-                }
-              : {
+            try {
+
+              resultado =
+                await sock.sendMessage(
+                  jid,
+                  {
+
+                    image: {
+                      url:
+                        imagem
+                    },
+
+                    caption:
+                      String(
+                        body.mensagem
+                      )
+                  }
+                );
+            }
+
+            catch (
+              erroImagem
+            ) {
+
+              console.error(
+                "Falha ao enviar imagem na rota /send. Tentando texto:",
+                erroImagem?.message ||
+                erroImagem
+              );
+
+
+              resultado =
+                await sock.sendMessage(
+                  jid,
+                  {
+
+                    text:
+                      String(
+                        body.mensagem
+                      )
+                  }
+                );
+            }
+          }
+
+          else {
+
+            resultado =
+              await sock.sendMessage(
+                jid,
+                {
 
                   text:
                     String(
                       body.mensagem
                     )
-
-                };
-
-
-          const resultado =
-            await sock.sendMessage(
-              jid,
-              conteudo
-            );
+                }
+              );
+          }
 
 
           responderJSON(
@@ -3961,15 +4805,11 @@ const server =
                   ?.key
                   ?.id ||
                 null
-
             }
           );
-
         }
 
-        catch (
-          erro
-        ) {
+        catch (erro) {
 
           responderJSON(
             res,
@@ -3981,15 +4821,12 @@ const server =
 
               erro:
                 erro.message
-
             }
           );
-
         }
 
 
         return;
-
       }
 
 
@@ -3999,6 +4836,10 @@ const server =
 
       const fila =
         carregarFila();
+
+
+      const disparador =
+        resumoDisparador();
 
 
       res.writeHead(
@@ -4049,6 +4890,43 @@ const server =
           </p>
 
           <p>
+            Pendentes:
+            ${
+              fila.filter(
+                item =>
+                  item.status ===
+                  "pendente"
+              ).length
+            }
+          </p>
+
+          <p>
+            Disparador:
+            ${
+              disparador.finalizado
+                ? "✅ Finalizado"
+                : disparador.pausado
+                  ? "⏸️ Pausado"
+                  : disparador.ativo
+                    ? "▶️ Em execução"
+                    : "⏹️ Parado"
+            }
+          </p>
+
+          <p>
+            Enviados:
+            ${disparador.enviados}
+            de
+            ${disparador.total}
+          </p>
+
+          <p>
+            Intervalo:
+            ${disparador.intervalo_segundos}
+            segundos
+          </p>
+
+          <p>
             <a
               href="/shopee/teste"
               style="
@@ -4075,7 +4953,6 @@ const server =
         </body>
         `
       );
-
     }
   );
 
@@ -4092,6 +4969,5 @@ server.listen(
     console.log(
       `Servidor rodando na porta ${PORT}`
     );
-
   }
 );
