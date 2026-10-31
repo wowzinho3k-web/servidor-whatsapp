@@ -21,6 +21,10 @@ const PORT =
 const AUTH_DIR =
   "/data/baileys-auth";
 
+const WHATSAPP_CONNECTION_FILE = "/data/whatsapp-connection.json";
+const PAIR_TIMEOUT_MS = 30000;
+const PAIR_CODE_TTL_MS = 60000;
+
 const SEND_KEY =
   process.env.SEND_KEY || "";
 
@@ -108,6 +112,248 @@ let conectado = false;
 
 let status =
   "Servidor iniciado.";
+
+// Apenas este arquivo novo seleciona a sessão; pastas antigas nunca são removidas.
+let controleWhatsApp = carregarControleWhatsApp();
+let contextoWhatsApp = null;
+let iniciandoWhatsApp = null;
+let reconexaoWhatsApp = null;
+let pareandoWhatsApp = false;
+let pairingCode = "";
+let pairingCodeExpiraEm = 0;
+
+function carregarControleWhatsApp() {
+  if (!fs.existsSync(WHATSAPP_CONNECTION_FILE)) {
+    return { authDir: AUTH_DIR, invalidated: false, requiresManualResume: true };
+  }
+  const dados = JSON.parse(fs.readFileSync(WHATSAPP_CONNECTION_FILE, "utf8"));
+  if (!dados || typeof dados.authDir !== "string" ||
+      !/^\/data\/baileys-auth(?:-pair-[a-f0-9-]{36})?$/.test(dados.authDir) ||
+      typeof dados.invalidated !== "boolean" ||
+      typeof dados.requiresManualResume !== "boolean") {
+    throw new Error("Controle de sessão WhatsApp inválido. Preserve o arquivo para revisão.");
+  }
+  // Todo início de processo exige retomada explícita: deploy nunca retoma envios.
+  return { ...dados, requiresManualResume: true };
+}
+
+function salvarControleWhatsApp(alteracoes) {
+  const proximo = { ...controleWhatsApp, ...alteracoes };
+  // Substituição atômica somente do metadado novo; não altera credenciais antigas.
+  fs.writeFileSync(WHATSAPP_CONNECTION_FILE + ".tmp", JSON.stringify(proximo, null, 2), { mode: 0o600 });
+  fs.renameSync(WHATSAPP_CONNECTION_FILE + ".tmp", WHATSAPP_CONNECTION_FILE);
+  controleWhatsApp = proximo;
+}
+
+function limparCodigoWhatsApp() {
+  pairingCode = "";
+  pairingCodeExpiraEm = 0;
+}
+
+function erroPareamento(mensagem, statusCode = 409) {
+  return Object.assign(new Error(mensagem), { statusCode });
+}
+
+function cancelarReconexaoWhatsApp() {
+  clearTimeout(reconexaoWhatsApp);
+  reconexaoWhatsApp = null;
+}
+
+async function encerrarSocketWhatsApp() {
+  cancelarReconexaoWhatsApp();
+  const anterior = contextoWhatsApp;
+  contextoWhatsApp = null;
+  sock = null;
+  conectado = false;
+  if (anterior) {
+    anterior.closed = true;
+    anterior.rejeitarEspera?.(erroPareamento("Conexão substituída."));
+    anterior.socket.end(new Error("Preparando vinculação solicitada pelo operador."));
+    await anterior.salvamento;
+  }
+}
+
+async function aguardarSocketPareavel(ctx) {
+  if (!ctx || ctx.closed || contextoWhatsApp !== ctx) throw erroPareamento("Conexão encerrada. Tente novamente.");
+  if (ctx.state.creds.registered) throw erroPareamento("Sessão já registrada; aguarde a reconexão.");
+  if (ctx.ready) return;
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => finalizar(erroPareamento("Tempo esgotado aguardando o WhatsApp.", 504)), PAIR_TIMEOUT_MS);
+    function finalizar(erro) {
+      clearTimeout(timer);
+      ctx.resolverEspera = null;
+      ctx.rejeitarEspera = null;
+      erro ? reject(erro) : resolve();
+    }
+    ctx.resolverEspera = () => finalizar();
+    ctx.rejeitarEspera = finalizar;
+  });
+}
+
+async function gerarCodigoWhatsApp(telefone) {
+  if (typeof telefone !== "string" || !/^\+?[\d\s().-]+$/.test(telefone.trim())) {
+    throw erroPareamento("Número inválido. Use código do país + DDD + número.", 400);
+  }
+  const phone = telefone.replace(/\D/g, "");
+  if (!/^[1-9]\d{9,14}$/.test(phone)) throw erroPareamento("Número inválido. Use código do país + DDD + número.", 400);
+  if (pareandoWhatsApp) throw erroPareamento("Já existe uma solicitação em andamento.");
+  if (conectado) throw erroPareamento("WhatsApp já conectado.");
+  if (processandoDisparo) throw erroPareamento("Aguarde o envio em andamento terminar.");
+  if (pairingCode && Date.now() < pairingCodeExpiraEm) {
+    throw erroPareamento("Já há um código disponível. Consulte-o ou aguarde a expiração.");
+  }
+  pareandoWhatsApp = true;
+  limparCodigoWhatsApp();
+  try {
+    await iniciandoWhatsApp;
+    if (conectado) throw erroPareamento("WhatsApp já conectado.");
+    const ctxAnterior = contextoWhatsApp;
+    if (ctxAnterior?.state.creds.registered && !controleWhatsApp.invalidated) {
+      throw erroPareamento("Sessão registrada em reconexão. Aguarde antes de vincular novamente.");
+    }
+    // O bloqueio sobrevive ao reinício e não modifica fila/configuração do disparador.
+    salvarControleWhatsApp({ requiresManualResume: true });
+    // Toda nova tentativa explícita usa credenciais e chaves novas, sem misturar sessões.
+    await encerrarSocketWhatsApp();
+    salvarControleWhatsApp({
+      authDir: AUTH_DIR + "-pair-" + crypto.randomUUID(),
+      invalidated: false
+    });
+    await iniciarWhatsApp();
+    const ctx = contextoWhatsApp;
+    await aguardarSocketPareavel(ctx);
+    if (contextoWhatsApp !== ctx || ctx.closed || ctx.state.creds.registered) {
+      throw erroPareamento("Conexão indisponível para pareamento.");
+    }
+    ctx.codeRequested = true;
+    status = "Gerando código de conexão...";
+    let timer;
+    let code;
+    try {
+      code = await Promise.race([
+        ctx.socket.requestPairingCode(phone),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(erroPareamento("Tempo esgotado gerando o código.", 504)), PAIR_TIMEOUT_MS);
+        })
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+    if (contextoWhatsApp !== ctx || ctx.closed || conectado) throw erroPareamento("A conexão mudou durante a solicitação.");
+    pairingCode = String(code);
+    pairingCodeExpiraEm = Date.now() + PAIR_CODE_TTL_MS;
+    status = "Código gerado. Digite-o no WhatsApp do celular.";
+  } catch (erro) {
+    limparCodigoWhatsApp();
+    if (!conectado) {
+      status = controleWhatsApp.invalidated
+        ? "Sessão encerrada (401/loggedOut). Solicite uma nova vinculação."
+        : "Não foi possível gerar o código. Tente novamente.";
+    }
+    // Uma operação expirada não pode terminar depois e alterar o socket vigente.
+    if (contextoWhatsApp && !conectado && !contextoWhatsApp.state.creds.registered) {
+      await encerrarSocketWhatsApp();
+    }
+    throw erro.statusCode ? erro : erroPareamento("Falha ao gerar código de vinculação.", 502);
+  } finally {
+    pareandoWhatsApp = false;
+  }
+}
+
+async function atenderPareamento(req, res) {
+  res.setHeader("Cache-Control", "no-store");
+  if (!chaveValida(req)) {
+    responderJSON(res, 401, { sucesso: false, erro: "Chave inválida." });
+    return;
+  }
+  try {
+    if (req.method === "POST") {
+      const tipo = String(req.headers["content-type"] || "").split(";")[0].trim();
+      if (tipo !== "application/json" && tipo !== "application/x-www-form-urlencoded") {
+        throw erroPareamento("Formato de requisição inválido.", 415);
+      }
+      const partes = [];
+      let tamanho = 0;
+      for await (const parte of req) {
+        tamanho += Buffer.byteLength(parte);
+        if (tamanho > 2048) throw erroPareamento("Requisição muito grande.", 413);
+        partes.push(Buffer.from(parte));
+      }
+      const body = Buffer.concat(partes).toString("utf8");
+      let phone;
+      try {
+        phone = tipo === "application/json" ? JSON.parse(body)?.phone : new URLSearchParams(body).get("phone");
+      } catch {
+        throw erroPareamento("Requisição inválida.", 400);
+      }
+      await gerarCodigoWhatsApp(phone);
+    }
+    if (Date.now() >= pairingCodeExpiraEm) limparCodigoWhatsApp();
+    responderJSON(res, 200, {
+      sucesso: true, conectado, status, pairingCode,
+      expiraEm: pairingCode ? pairingCodeExpiraEm : null,
+      retomadaManualNecessaria: controleWhatsApp.requiresManualResume
+    });
+  } catch (erro) {
+    responderJSON(res, erro.statusCode || 500, { sucesso: false, erro: erro.statusCode ? erro.message : "Falha ao preparar vinculação." });
+  }
+}
+
+function formularioPareamento() {
+  // A chave permanece apenas em memória na página; nunca é salva no navegador.
+  return `
+    <section style="max-width:520px;margin:24px auto">
+      <h2>Vincular WhatsApp pelo telefone</h2>
+      <form id="pair-form" method="POST" action="/pair">
+        <p><label>Chave de acesso (SEND_KEY)<br><input id="pair-key" type="password" autocomplete="off" required></label></p>
+        <p><label>Número com país e DDD<br><input name="phone" type="tel" placeholder="55 + DDD + número" autocomplete="off" required></label></p>
+        <button id="pair-submit" type="submit">Gerar código</button>
+        <button id="pair-refresh" type="button">Consultar código / conexão</button>
+      </form>
+      <p id="pair-status" role="status"></p>
+      <output id="pair-code" style="font-size:32px;letter-spacing:4px"></output>
+      <p>No celular: WhatsApp → Aparelhos conectados → Conectar um aparelho → Conectar com número de telefone.</p>
+      <p>Após vincular, inicie ou continue o disparador explicitamente para liberar os envios.</p>
+    </section>
+    <script>
+      (() => {
+        const form = document.getElementById('pair-form');
+        const button = document.getElementById('pair-submit');
+        const output = document.getElementById('pair-code');
+        const message = document.getElementById('pair-status');
+        let expiryTimer;
+        async function consultar(gerar) {
+          button.disabled = true;
+          output.textContent = '';
+          clearTimeout(expiryTimer);
+          message.textContent = gerar ? 'Preparando conexão e gerando código...' : 'Consultando conexão...';
+          try {
+            const key = document.getElementById('pair-key').value;
+            const response = await fetch('/pair', {
+              method: gerar ? 'POST' : 'GET',
+              headers: { 'Content-Type': 'application/json', 'x-send-key': key },
+              cache: 'no-store',
+              ...(gerar ? { body: JSON.stringify({ phone: form.elements.phone.value }) } : {})
+            });
+            const data = await response.json();
+            if (!response.ok) throw new Error(data.erro || 'Falha na solicitação.');
+            message.textContent = data.status + (data.retomadaManualNecessaria ? ' Envios automáticos bloqueados até iniciar/continuar o disparador.' : '');
+            output.textContent = data.pairingCode || '';
+            if (data.pairingCode) expiryTimer = setTimeout(() => {
+              output.textContent = '';
+              message.textContent = 'Código ocultado por segurança. Consulte a conexão antes de solicitar outro.';
+            }, Math.max(0, data.expiraEm - Date.now()));
+          } catch (erro) {
+            message.textContent = erro.message;
+          } finally {
+            button.disabled = false;
+          }
+        }
+        form.addEventListener('submit', event => { event.preventDefault(); consultar(true); });
+        document.getElementById('pair-refresh').addEventListener('click', () => consultar(false));
+      })();
+    </script>`;
+}
 
 
 // ======================================================
@@ -464,123 +710,98 @@ function formatarNumeroBR(valor) {
 // ======================================================
 
 async function iniciarWhatsApp() {
+  if (iniciandoWhatsApp) return iniciandoWhatsApp;
+  iniciandoWhatsApp = (async () => {
+    if (controleWhatsApp.invalidated) {
+      status = "Sessão encerrada (401/loggedOut). Solicite uma nova vinculação.";
+      return;
+    }
+    if (contextoWhatsApp && !contextoWhatsApp.closed) return;
+    cancelarReconexaoWhatsApp();
+    const authDir = controleWhatsApp.authDir;
+    const { state, saveCreds } = await useMultiFileAuthState(authDir);
+    const socket = makeWASocket({
+      auth: state,
+      logger: pino({ level: "silent" }),
+      browser: Browsers.ubuntu("Chrome"),
+      syncFullHistory: false,
+      markOnlineOnConnect: false
+    });
+    const ctx = { socket, state, authDir, closed: false, ready: false,
+      codeRequested: false, salvamento: Promise.resolve() };
+    contextoWhatsApp = ctx;
+    sock = socket;
+    conectado = false;
+    status = state.creds.registered ? "Reconectando WhatsApp..." : "Informe seu número para gerar o código.";
 
-  const {
-    state,
-    saveCreds
-  } =
-    await useMultiFileAuthState(
-      AUTH_DIR
-    );
-
-
-  sock =
-    makeWASocket({
-
-      auth:
-        state,
-
-      logger:
-        pino({
-          level:
-            "silent"
-        }),
-
-      browser:
-        Browsers.ubuntu(
-          "Chrome"
-        ),
-
-      printQRInTerminal:
-        false,
-
-      syncFullHistory:
-        false,
-
-      markOnlineOnConnect:
-        false
+    socket.ev.on("creds.update", () => {
+      if (contextoWhatsApp !== ctx || ctx.closed) return;
+      ctx.salvamento = ctx.salvamento.then(saveCreds).catch(() => {
+        status = "Não foi possível salvar a sessão WhatsApp. Verifique o armazenamento.";
+        conectado = false;
+        controleWhatsApp.requiresManualResume = true;
+        console.error("Falha ao persistir credenciais WhatsApp.");
+        ctx.closed = true;
+        ctx.rejeitarEspera?.(erroPareamento("Falha ao salvar a sessão."));
+        socket.end(new Error("Falha ao persistir sessão."));
+      });
     });
 
-
-  sock.ev.on(
-    "creds.update",
-    saveCreds
-  );
-
-
-  sock.ev.on(
-    "connection.update",
-    update => {
-
-      const {
-        connection,
-        lastDisconnect
-      } =
-        update;
-
-
-      if (
-        connection ===
-        "open"
-      ) {
-
-        conectado =
-          true;
-
-        status =
-          "WhatsApp conectado.";
-
-        console.log(
-          "WhatsApp conectado."
-        );
+    socket.ev.on("connection.update", update => {
+      if (contextoWhatsApp !== ctx || ctx.closed) return;
+      const { connection, lastDisconnect, qr } = update;
+      if (qr && !state.creds.registered) {
+        // Esperar QR é mais conservador que apenas "connecting": transporte pronto.
+        ctx.ready = true;
+        ctx.resolverEspera?.();
       }
-
-
-      if (
-        connection ===
-        "close"
-      ) {
-
-        conectado =
-          false;
-
-
-        const statusCode =
-          lastDisconnect
-            ?.error
-            ?.output
-            ?.statusCode;
-
-
-        console.log(
-          "WhatsApp desconectou:",
-          statusCode
-        );
-
-
-        const saiuDaConta =
-          statusCode ===
-          DisconnectReason.loggedOut;
-
-
-        if (
-          !saiuDaConta
-        ) {
-
-          setTimeout(
-            () => {
-
-              iniciarWhatsApp()
-                .catch(
-                  console.error
-                );
-            },
-            5000
-          );
+      if (connection === "open") {
+        conectado = true;
+        limparCodigoWhatsApp();
+        status = "WhatsApp conectado.";
+        console.log("WhatsApp conectado.");
+      }
+      if (connection !== "close") return;
+      ctx.closed = true;
+      conectado = false;
+      sock = null;
+      limparCodigoWhatsApp();
+      const code = lastDisconnect?.error?.output?.statusCode;
+      ctx.rejeitarEspera?.(erroPareamento("Conexão encerrada. Tente novamente."));
+      console.log("WhatsApp desconectou:", code);
+      cancelarReconexaoWhatsApp();
+      if (code === DisconnectReason.loggedOut) {
+        controleWhatsApp.invalidated = true;
+        controleWhatsApp.requiresManualResume = true;
+        status = "Sessão encerrada (401/loggedOut). Solicite uma nova vinculação.";
+        try {
+          salvarControleWhatsApp({ invalidated: true, requiresManualResume: true });
+        } catch {
+          console.error("Falha ao persistir estado loggedOut. Envios bloqueados nesta execução.");
         }
+        return;
       }
-    }
-  );
+      status = "WhatsApp desconectado. Aguardando reconexão.";
+      // Após parear, 515 pede outro socket com AS MESMAS credenciais.
+      if (state.creds.registered || code === DisconnectReason.restartRequired) {
+        reconexaoWhatsApp = setTimeout(() => {
+          reconexaoWhatsApp = null;
+          if (contextoWhatsApp !== ctx || controleWhatsApp.invalidated) return;
+          ctx.salvamento.then(() => iniciarWhatsApp()).catch(() => {
+            status = "Falha ao reconectar WhatsApp. Tente novamente.";
+            console.error("Falha ao reconectar WhatsApp.");
+          });
+        }, code === DisconnectReason.restartRequired ? 1000 : 5000);
+      } else {
+        status = "Conexão de vinculação encerrada. Solicite outro código.";
+      }
+    });
+  })();
+  try {
+    return await iniciandoWhatsApp;
+  } finally {
+    iniciandoWhatsApp = null;
+  }
 }
 
 
@@ -2778,7 +2999,10 @@ let processandoDisparo =
 async function processarDisparadorAutomatico() {
 
   if (
-    processandoDisparo
+    processandoDisparo ||
+    !conectado ||
+    pareandoWhatsApp ||
+    controleWhatsApp.requiresManualResume
   ) {
 
     return;
@@ -3174,6 +3398,15 @@ const server =
 
 
 // ======================================================
+// VINCULAÇÃO (chave somente no cabeçalho)
+// ======================================================
+
+      if (caminho === "/pair" && (req.method === "POST" || req.method === "GET")) {
+        await atenderPareamento(req, res);
+        return;
+      }
+
+// ======================================================
 // STATUS
 // ======================================================
 
@@ -3206,6 +3439,9 @@ const server =
               conectado
                 ? "conectado"
                 : "desconectado",
+
+            whatsapp_status: status,
+            retomada_manual_necessaria: controleWhatsApp.requiresManualResume,
 
             mercado_livre:
               tokenML?.access_token
@@ -4071,6 +4307,11 @@ const server =
             return;
           }
 
+          if (!conectado || pareandoWhatsApp) {
+            throw new Error("WhatsApp não conectado ou em vinculação.");
+          }
+          const contextoRetomada = contextoWhatsApp;
+
 
           if (
             !sock ||
@@ -4206,9 +4447,15 @@ const server =
           };
 
 
+          if (!conectado || pareandoWhatsApp || contextoWhatsApp !== contextoRetomada) {
+            throw new Error("A conexão mudou. Confirme a retomada novamente.");
+          }
+
           salvarDisparador(
             config
           );
+
+          salvarControleWhatsApp({ requiresManualResume: false });
 
 
           responderJSON(
@@ -4363,6 +4610,11 @@ const server =
             return;
           }
 
+          if (!conectado || pareandoWhatsApp) {
+            throw new Error("WhatsApp não conectado ou em vinculação.");
+          }
+          const contextoRetomada = contextoWhatsApp;
+
 
           const fila =
             carregarFila();
@@ -4417,9 +4669,15 @@ const server =
             null;
 
 
+          if (!conectado || pareandoWhatsApp || contextoWhatsApp !== contextoRetomada) {
+            throw new Error("A conexão mudou. Confirme a retomada novamente.");
+          }
+
           salvarDisparador(
             config
           );
+
+          salvarControleWhatsApp({ requiresManualResume: false });
 
 
           responderJSON(
@@ -4842,6 +5100,8 @@ const server =
         resumoDisparador();
 
 
+      res.setHeader("Cache-Control", "no-store");
+
       res.writeHead(
         200,
         {
@@ -4873,6 +5133,12 @@ const server =
                 : "❌ desconectado"
             }
           </p>
+
+          ${formularioPareamento()}
+
+          ${controleWhatsApp.requiresManualResume
+            ? '<p>⏸️ Envios automáticos bloqueados. Inicie ou continue o disparador somente quando desejar enviar.</p>'
+            : ''}
 
           <p>
             Shopee:
