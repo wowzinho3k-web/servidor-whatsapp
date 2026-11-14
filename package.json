@@ -7,13 +7,13 @@
     "start": "node server.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.11.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
-    "qrcode": "latest",
-    "pino": "latest",
-    "puppeteer-core": "25.11.0",
-    "@sparticuz/chromium": "153.0.0"
+    "@whiskeysockets/baileys": "6.7.24",
+    "qrcode": "1.5.4",
+    "pino": "10.4.0",
+    "puppeteer-core": "24.26.1",
+    "@sparticuz/chromium": "141.0.0"
   }
 }
