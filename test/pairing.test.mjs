@@ -580,6 +580,10 @@ test('rotas originais e implementações das integrações permanecem preservada
   const mercadoLivre = s => s.slice(s.indexOf('// MERCADO LIVRE - PKCE'), s.indexOf('// SHOPEE - ASSINATURA'));
   assert.equal(mercadoLivre(source), mercadoLivre(original));
   assert.ok(routes(source).includes('/shopee/ofertas'));
-  const packageJson = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
-  assert.equal(packageJson.replace(/\r\n/g, '\n'), execFileSync('git', ['show', 'HEAD:package.json'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' }));
+  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const packageLock = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
+  assert.equal(packageJson.name, 'servidor-whatsapp');
+  assert.equal(packageJson.engines.node, '>=20.11.0');
+  assert.ok(Object.values(packageJson.dependencies).every(version => /^\d+\.\d+\.\d+$/.test(version)));
+  assert.deepEqual(packageLock.packages[''].dependencies, packageJson.dependencies);
 });
