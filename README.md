@@ -4,6 +4,74 @@ Servidor atual do Achadinhos Automático: WhatsApp/Baileys, Shopee, Mercado Livr
 fila e disparador. O pareamento por telefone foi recuperado como alteração pontual;
 o servidor antigo não substitui esta versão.
 
+## API oficial de afiliados Shopee
+
+A extensão envia App ID e Secret somente ao backend por HTTPS. O Secret não é
+gravado no Chrome nem devolvido pela API. O servidor valida as credenciais com
+`productOfferV2` e só então grava o Secret cifrado com AES-256-GCM, vinculado ao
+ID gerado pelo servidor. A chave de cifragem fica somente em variável de
+ambiente. O fluxo comercial usa contas com senha PBKDF2 e sessões temporárias; a
+instalação pessoal usa um código de ativação de uso único e token de dispositivo.
+
+Antes de iniciar o servidor com a nova integração, configure no ambiente do
+backend:
+
+```text
+SHOPEE_CREDENTIALS_KEY=<64 caracteres hexadecimais aleatórios, 32 bytes>
+SHOPEE_DEVICE_ENROLLMENT_CODE=<código aleatório de ativação, usado uma vez>
+SHOPEE_BOOTSTRAP_TOKEN=<token de bootstrap do fluxo comercial, se usado>
+SHOPEE_ACCOUNT_ADMIN_KEY=<token administrativo aleatório>
+SHOPEE_ALLOWED_ORIGINS=chrome-extension://<ID-DA-EXTENSAO>
+```
+
+Gere valores aleatórios sem colocá-los no repositório ou na extensão:
+
+```sh
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+Use o formato hexadecimal para `SHOPEE_CREDENTIALS_KEY`. Para a instalação
+pessoal, gere um `SHOPEE_DEVICE_ENROLLMENT_CODE` com 32 bytes aleatórios e
+configure-o somente no ambiente do backend; não o inclua na extensão. Na
+primeira conexão, o botão pede esse código uma única vez. O servidor valida e
+consome o código, cria a identidade do dispositivo e entrega um token aleatório
+cujo hash fica no servidor. A extensão conserva esse token em
+`chrome.storage.local` para não pedir ativação a cada abertura; o Secret da API
+Shopee nunca é salvo no Chrome. A ativação falha se a chave de cifragem não
+estiver configurada. A marca de uso é persistida em `/data/shopee-users.json`.
+Se o perfil do Chrome for perdido ou a extensão reinstalada, gere um código
+novo e substitua `SHOPEE_DEVICE_ENROLLMENT_CODE` no backend antes de reiniciar
+o servidor. O novo pareamento revoga o token anterior e mantém as credenciais da
+conta pessoal.
+
+Configure a origem exata da extensão em `SHOPEE_ALLOWED_ORIGINS` (e a origem de
+desenvolvimento, se usada). O código de ativação não é uma rota de configuração
+nem uma chave administrativa; é aceito apenas uma vez, por HTTPS e com
+limitação de tentativas. Os endpoints `/shopee/auth/register`, `/shopee/auth/login`
+e convites continuam disponíveis para o futuro fluxo comercial com contas
+individuais. O endpoint administrativo de convites usa exclusivamente a chave
+do backend, nunca distribuída à extensão.
+
+Os dados persistidos ficam em `/data/shopee-users.json` e
+`/data/shopee-credentials.json`, ambos gravados com permissão restrita e
+substituição atômica. Faça backup de `/data` e mantenha a chave de cifragem fora
+desse volume. Perder a chave impede descriptografar os Secrets armazenados.
+
+`/shopee/device/enroll` aceita somente o código pessoal de uso único;
+`/shopee/connection`, `/shopee/teste` e `/shopee/ofertas` exigem token Bearer
+emitido pelo backend e nunca confiam em `userId` enviado pelo navegador nem em
+`SEND_KEY`. O fluxo individual mantém `/shopee/auth/register` e
+`/shopee/auth/login`. Rotas Shopee aplicam allowlist CORS separada; a consulta
+GraphQL roda no servidor, com credenciais cifradas por identidade autenticada, e
+a busca preserva `offerLink` da Shopee.
+
+Esta persistência em JSON foi escolhida para o servidor pessoal atual, que já
+usa arquivos em `/data` e uma instância do processo. Para uma oferta comercial
+com várias instâncias/alto volume, migrar contas, convites, sessões e credenciais
+cifradas para banco transacional e KMS, mantendo o mesmo vínculo por identidade
+autenticada. Não use um `userId` informado pelo cliente como autorização.
+
 ## Vincular pelo telefone
 
 Procedimento para uso **somente depois de revisar e autorizar a publicação**:

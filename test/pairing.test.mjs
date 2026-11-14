@@ -26,7 +26,8 @@ const close = (socket, code) => socket.ev.emit('connection.update', {
 });
 
 async function fixture({ registered = false, files: initialFiles, autoReady = true,
-  requestCode, saveFailure = false, writeFailure = false, key = 'test-secret' } = {}) {
+  requestCode, saveFailure = false, writeFailure = false, key = 'test-secret', fetchShopee,
+  shopeeEncryptionKey = 'a'.repeat(64), shopeeDeviceEnrollmentCode = 'simulated-personal-device-enrollment-code-1234567890' } = {}) {
   const files = new Map(initialFiles || [
     [legacyDir + '/creds.json', JSON.stringify({ registered })],
     [legacyDir + '/session-keep.json', 'preservar esta sessão'],
@@ -53,7 +54,14 @@ async function fixture({ registered = false, files: initialFiles, autoReady = tr
   };
   const sandbox = {
     fs: disk, crypto, Buffer, URL, URLSearchParams,
-    process: { env: { SEND_KEY: key } },
+    process: { env: {
+      SEND_KEY: key,
+      SHOPEE_CREDENTIALS_KEY: shopeeEncryptionKey,
+      SHOPEE_BOOTSTRAP_TOKEN: 'simulated-bootstrap-invite',
+      SHOPEE_DEVICE_ENROLLMENT_CODE: shopeeDeviceEnrollmentCode,
+      SHOPEE_ACCOUNT_ADMIN_KEY: 'simulated-admin-key',
+      SHOPEE_ALLOWED_ORIGINS: 'chrome-extension://test-extension'
+    } },
     console: { log() {}, error() {} },
     Date: class extends Date {
       constructor(...args) { super(...(args.length ? args : [now])); }
@@ -88,16 +96,23 @@ async function fixture({ registered = false, files: initialFiles, autoReady = tr
       return socket;
     },
     http: { createServer(fn) { handler = fn; return { listen() {} }; } },
-    fetch() { throw new Error('Network is forbidden in tests'); }
+    fetch(url, options) {
+      if (fetchShopee) return fetchShopee(url, options);
+      throw new Error('Network is forbidden in tests');
+    }
   };
   await vm.runInNewContext(`(async () => { ${executable}\nreturn { processarDisparadorAutomatico, iniciarWhatsApp }; })()`, sandbox);
-  async function request(path = '/pair', { method = 'GET', body, stream, auth = key,
+  async function request(path = '/pair', { method = 'GET', body, stream, auth = key, bearer, adminKey, origin,
     type = 'application/json' } = {}) {
     const req = Readable.from(stream || (body === undefined ? [] : [Buffer.from(typeof body === 'string' ? body : JSON.stringify(body))]));
     req.method = method;
     req.url = path;
     req.headers = { host: 'localhost', 'content-type': type };
     if (auth !== null) req.headers['x-send-key'] = auth;
+    if (bearer) req.headers.authorization = `Bearer ${bearer}`;
+    if (adminKey) req.headers['x-shopee-admin-key'] = adminKey;
+    if (origin) req.headers.origin = origin;
+    req.socket = { remoteAddress: '127.0.0.1' };
     const res = {
       headers: {}, code: 200, body: '',
       setHeader(k, v) { this.headers[k.toLowerCase()] = v; },
@@ -434,12 +449,137 @@ test('metadado corrompido falha fechado sem selecionar outra sessão', async () 
   await assert.rejects(fixture({ files: [[controlFile, '{']] }));
 });
 
+test('contas Shopee usam autenticação real, credenciais criptografadas e isolamento por usuário', async () => {
+  let respostaShopee = { data: { productOfferV2: { nodes: [], pageInfo: { page: 1, limit: 1, hasNextPage: false } } } };
+  const chamadasShopee = [];
+  const f = await fixture({ fetchShopee: async (url, options) => {
+    chamadasShopee.push({ url, options });
+    return { ok: true, status: 200, async text() { return JSON.stringify(respostaShopee); } };
+  } });
+
+  assert.equal((await f.request('/shopee/connection')).code, 401, 'SEND_KEY sozinha não autentica a conta Shopee');
+  assert.equal((await f.request('/shopee/ofertas?quantidade=1')).code, 401);
+  assert.equal((await f.request('/shopee/admin/invites', { method: 'POST', body: {} })).code, 401);
+
+  const registro1 = await f.request('/shopee/auth/register', { method: 'POST', auth: null,
+    body: { email: 'um@example.test', password: 'senha-forte-simulada-1', inviteCode: 'simulated-bootstrap-invite' } });
+  assert.equal(registro1.code, 201);
+  const sessao1 = registro1.json.token;
+  assert.ok(sessao1);
+  let armazenamento = f.files.get('/data/shopee-users.json');
+  assert.ok(!armazenamento.includes('senha-forte-simulada-1'));
+  assert.ok(!armazenamento.includes(sessao1));
+
+  const convite = await f.request('/shopee/admin/invites', { method: 'POST', adminKey: 'simulated-admin-key', body: { email: 'dois@example.test' } });
+  assert.equal(convite.code, 201);
+  const registro2 = await f.request('/shopee/auth/register', { method: 'POST', auth: null,
+    body: { email: 'dois@example.test', password: 'senha-forte-simulada-2', inviteCode: convite.json.inviteCode } });
+  assert.equal(registro2.code, 201);
+  const sessao2 = registro2.json.token;
+  assert.equal((await f.request('/shopee/connection', { bearer: sessao2, origin: 'https://site-malicioso.example' })).headers['access-control-allow-origin'], undefined);
+
+  respostaShopee = { errors: [{ message: 'Invalid Signature' }] };
+  const falha = await f.request('/shopee/connection', { method: 'POST', bearer: sessao1,
+    body: { appId: '111111', secret: 'secret-shopee-simulado-um' } });
+  assert.equal(falha.code, 400);
+  assert.equal(f.files.has('/data/shopee-credentials.json'), false, 'credenciais inválidas não são armazenadas');
+
+  respostaShopee = { data: { productOfferV2: { nodes: [], pageInfo: { page: 1, limit: 1, hasNextPage: false } } } };
+  const connect1 = await f.request('/shopee/connection', { method: 'POST', bearer: sessao1, origin: 'chrome-extension://test-extension',
+    body: { appId: '111111', secret: 'secret-shopee-simulado-um' } });
+  assert.equal(connect1.code, 200);
+  assert.equal(connect1.json.connected, true);
+  assert.equal(connect1.headers['access-control-allow-origin'], 'chrome-extension://test-extension');
+
+  const connect2 = await f.request('/shopee/connection', { method: 'POST', bearer: sessao2,
+    body: { appId: '222222', secret: 'secret-shopee-simulado-dois' } });
+  assert.equal(connect2.code, 200);
+  const credenciaisCriptografadas = f.files.get('/data/shopee-credentials.json');
+  assert.ok(!credenciaisCriptografadas.includes('secret-shopee-simulado-um'));
+  assert.ok(!credenciaisCriptografadas.includes('secret-shopee-simulado-dois'));
+
+  const status2 = await f.request('/shopee/connection', { bearer: sessao2 });
+  assert.equal(status2.json.connected, true);
+  assert.equal(status2.json.appId, '••••2222');
+
+  respostaShopee = { data: { productOfferV2: {
+    nodes: [{ itemId: 87654321, productName: 'Fone Bluetooth autenticado', priceMin: 99.9, priceMax: 120,
+      priceDiscountRate: 20, imageUrl: 'https://img.example/item.jpg', productLink: 'https://shopee.com.br/i.100.87654321',
+      offerLink: 'https://shopee.com.br/universal-link-afiliado', shopName: 'Loja Simulada', sales: 500, ratingStar: 4.8, commissionRate: '0.1' }],
+    pageInfo: { page: 1, limit: 20, hasNextPage: false }
+  } } };
+  const ofertas = await f.request('/shopee/ofertas?quantidade=1', { bearer: sessao1 });
+  assert.equal(ofertas.code, 200);
+  assert.equal(ofertas.json.total, 1);
+  assert.equal(ofertas.json.ofertas[0].link, 'https://shopee.com.br/universal-link-afiliado');
+  const chamada = chamadasShopee.at(-1);
+  assert.equal(chamada.url, 'https://open-api.affiliate.shopee.com.br/graphql');
+  const authHeader = chamada.options.headers.Authorization;
+  const timestamp = authHeader.match(/Timestamp=(\d+)/)[1];
+  const assinatura = crypto.createHash('sha256').update(`111111${timestamp}${chamada.options.body}secret-shopee-simulado-um`).digest('hex');
+  assert.ok(authHeader.includes(`Signature=${assinatura}`), 'assinatura usa credencial do usuário autenticado');
+
+  assert.equal((await f.request('/shopee/connection', { method: 'DELETE', bearer: sessao1 })).json.connected, false);
+  assert.equal((await f.request('/shopee/connection', { bearer: sessao2 })).json.connected, true, 'desconectar uma conta não afeta outra');
+  const logout = await f.request('/shopee/auth/logout', { method: 'POST', bearer: sessao2 });
+  assert.equal(logout.code, 200);
+  assert.equal((await f.request('/shopee/connection', { bearer: sessao2 })).code, 401);
+});
+
+test('ativação pessoal usa código de uso único e token duradouro sem identidade enviada pelo cliente', async () => {
+  const f = await fixture({ fetchShopee: async () => ({ ok: true, status: 200, async text() {
+    return JSON.stringify({ data: { productOfferV2: { nodes: [], pageInfo: { page: 1, limit: 1, hasNextPage: false } } } });
+  } }) });
+  const codigo = 'simulated-personal-device-enrollment-code-1234567890';
+  assert.equal((await f.request('/shopee/device/enroll', { method: 'POST', auth: null, body: { code: 'wrong-code' } })).code, 401);
+  const ativacao = await f.request('/shopee/device/enroll', { method: 'POST', auth: null,
+    body: { code: codigo, userId: 'id-arbitrario-controlado-pelo-cliente' } });
+  assert.equal(ativacao.code, 201);
+  const token = ativacao.json.token;
+  assert.ok(token);
+  let usuarios = f.files.get('/data/shopee-users.json');
+  assert.ok(!usuarios.includes(token), 'backend guarda só o hash do token');
+  assert.ok(!usuarios.includes(codigo), 'código de ativação não é persistido');
+  assert.ok(!usuarios.includes('id-arbitrario-controlado-pelo-cliente'), 'identidade vem do servidor');
+  assert.equal(JSON.parse(usuarios).deviceEnrollmentUsed, true);
+  assert.equal((await f.request('/shopee/connection', { bearer: token })).json.connected, false);
+  f.advance(400 * 24 * 60 * 60 * 1000);
+  assert.equal((await f.request('/shopee/connection', { bearer: token })).code, 200, 'token do dispositivo não expira em cada abertura');
+  assert.equal((await f.request('/shopee/device/enroll', { method: 'POST', auth: null, body: { code: codigo } })).code, 409);
+  const connected = await f.request('/shopee/connection', { method: 'POST', bearer: token,
+    body: { appId: '555555', secret: 'simulated-personal-api-secret' } });
+  assert.equal(connected.code, 200);
+  const stored = f.files.get('/data/shopee-credentials.json');
+  assert.ok(!stored.includes('simulated-personal-api-secret'), 'Secret Shopee permanece cifrado no backend');
+
+  const novoCodigo = 'simulated-personal-device-enrollment-code-rotated-9876543210';
+  const recuperacao = await fixture({ files: [...f.files.entries()], shopeeDeviceEnrollmentCode: novoCodigo });
+  const novoDispositivo = await recuperacao.request('/shopee/device/enroll', { method: 'POST', auth: null, body: { code: novoCodigo } });
+  assert.equal(novoDispositivo.code, 201, 'código rotacionado permite recuperar uma instalação reinstalada');
+  assert.equal((await recuperacao.request('/shopee/connection', { bearer: token })).code, 401, 'token anterior é revogado ao reativar o dispositivo');
+});
+
+test('falha fechada se o backend não tiver chave de cifragem configurada', async () => {
+  const f = await fixture({ shopeeEncryptionKey: '', fetchShopee: async () => {
+    throw new Error('A API Shopee não deve ser chamada sem chave de cifragem.');
+  } });
+  const registro = await f.request('/shopee/auth/register', { method: 'POST', auth: null,
+    body: { email: 'pessoal@example.test', password: 'senha-forte-simulada-3', inviteCode: 'simulated-bootstrap-invite' } });
+  assert.equal(registro.code, 201);
+  const response = await f.request('/shopee/connection', { method: 'POST', bearer: registro.json.token,
+    body: { appId: '333333', secret: 'secret-shopee-simulado-tres' } });
+  assert.equal(response.code, 503);
+  assert.equal(f.files.has('/data/shopee-credentials.json'), false);
+});
+
 test('rotas originais e implementações das integrações permanecem preservadas', () => {
   const original = execFileSync('git', ['show', '492cfd7a23622c91abe16dddee9a3ed55e2634ff:server.js'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' });
   const routes = s => [...s.matchAll(/caminho\s*===\s*"([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(routes(source).filter(p => p !== '/pair'), routes(original));
-  const integrations = s => s.slice(s.indexOf('// MERCADO LIVRE - PKCE'), s.indexOf('// PROCESSAR DISPARADOR'));
-  assert.equal(integrations(source), integrations(original));
+  const rotasNaoShopee = s => routes(s).filter(p => p !== '/pair' && !p.startsWith('/shopee/')).sort();
+  assert.deepEqual(rotasNaoShopee(source), rotasNaoShopee(original));
+  const mercadoLivre = s => s.slice(s.indexOf('// MERCADO LIVRE - PKCE'), s.indexOf('// SHOPEE - ASSINATURA'));
+  assert.equal(mercadoLivre(source), mercadoLivre(original));
+  assert.ok(routes(source).includes('/shopee/ofertas'));
   const packageJson = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
   assert.equal(packageJson.replace(/\r\n/g, '\n'), execFileSync('git', ['show', 'HEAD:package.json'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' }));
 });

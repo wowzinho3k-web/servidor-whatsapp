@@ -53,14 +53,19 @@ const ML_OAUTH_FILE =
 // SHOPEE
 // ======================================================
 
-const SHOPEE_APP_ID =
-  process.env.SHOPEE_APP_ID || "";
-
-const SHOPEE_SECRET =
-  process.env.SHOPEE_SECRET || "";
-
 const SHOPEE_ENDPOINT =
   "https://open-api.affiliate.shopee.com.br/graphql";
+
+const SHOPEE_USERS_FILE = "/data/shopee-users.json";
+const SHOPEE_CREDENTIALS_FILE = "/data/shopee-credentials.json";
+const SHOPEE_CREDENTIALS_KEY = process.env.SHOPEE_CREDENTIALS_KEY || "";
+const SHOPEE_BOOTSTRAP_TOKEN = process.env.SHOPEE_BOOTSTRAP_TOKEN || "";
+const SHOPEE_DEVICE_ENROLLMENT_CODE = process.env.SHOPEE_DEVICE_ENROLLMENT_CODE || "";
+const SHOPEE_ACCOUNT_ADMIN_KEY = process.env.SHOPEE_ACCOUNT_ADMIN_KEY || "";
+const SHOPEE_ALLOWED_ORIGINS = String(process.env.SHOPEE_ALLOWED_ORIGINS || "").split(",").map(value => value.trim()).filter(Boolean);
+const SHOPEE_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const SHOPEE_PASSWORD_ITERATIONS = 310000;
+const tentativasShopeeAuth = new Map();
 
 
 // ======================================================
@@ -360,7 +365,19 @@ function formularioPareamento() {
 // CORS
 // ======================================================
 
-function aplicarCORS(res) {
+function aplicarCORS(res, req = res.corsRequest) {
+
+  const caminho = req ? new URL(req.url, `http://${req.headers.host || "localhost"}`).pathname : "";
+  if (caminho.startsWith("/shopee/")) {
+    const origin = req.headers.origin;
+    if (origin && SHOPEE_ALLOWED_ORIGINS.includes(origin)) {
+      res.setHeader("Access-Control-Allow-Origin", origin);
+      res.setHeader("Vary", "Origin");
+    }
+    res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    return;
+  }
 
   res.setHeader(
     "Access-Control-Allow-Origin",
@@ -374,7 +391,7 @@ function aplicarCORS(res) {
 
   res.setHeader(
     "Access-Control-Allow-Headers",
-    "Content-Type, x-send-key"
+    "Content-Type, x-send-key, Authorization"
   );
 }
 
@@ -422,6 +439,143 @@ function chaveValida(req) {
     SEND_KEY &&
     recebida === SEND_KEY
   );
+}
+
+function erroShopeeAuth(mensagem, status = 400) {
+  return Object.assign(new Error(mensagem), { statusCode: status });
+}
+
+function hashShopeeAuth(value) {
+  return crypto.createHash("sha256").update(String(value), "utf8").digest("hex");
+}
+
+function segredoIgual(a, b) {
+  if (!a || !b) return false;
+  const hashA = Buffer.from(hashShopeeAuth(a), "hex");
+  const hashB = Buffer.from(hashShopeeAuth(b), "hex");
+  return crypto.timingSafeEqual(hashA, hashB);
+}
+
+function lerContasShopee() {
+  if (!fs.existsSync(SHOPEE_USERS_FILE)) return { users: [], sessions: [], invites: [], bootstrapUsed: false, deviceEnrollmentUsed: false };
+  const dados = lerJSON(SHOPEE_USERS_FILE);
+  if (!dados || !Array.isArray(dados.users) || !Array.isArray(dados.sessions) || !Array.isArray(dados.invites)) {
+    throw erroShopeeAuth("Armazenamento de contas Shopee indisponível.", 503);
+  }
+  return dados;
+}
+
+function salvarContasShopee(dados) {
+  const temporario = SHOPEE_USERS_FILE + ".tmp";
+  fs.writeFileSync(temporario, JSON.stringify(dados, null, 2), { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(temporario, SHOPEE_USERS_FILE);
+}
+
+function lerCredenciaisShopee() {
+  if (!fs.existsSync(SHOPEE_CREDENTIALS_FILE)) return {};
+  const dados = lerJSON(SHOPEE_CREDENTIALS_FILE);
+  if (!dados || typeof dados !== "object" || Array.isArray(dados)) throw erroShopeeAuth("Armazenamento de credenciais Shopee indisponível.", 503);
+  return dados;
+}
+
+function salvarCredenciaisShopee(dados) {
+  const temporario = SHOPEE_CREDENTIALS_FILE + ".tmp";
+  fs.writeFileSync(temporario, JSON.stringify(dados, null, 2), { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(temporario, SHOPEE_CREDENTIALS_FILE);
+}
+
+function chaveCriptografiaShopee() {
+  if (!/^[a-f0-9]{64}$/i.test(SHOPEE_CREDENTIALS_KEY)) {
+    throw erroShopeeAuth("Servidor sem chave de criptografia Shopee configurada.", 503);
+  }
+  return Buffer.from(SHOPEE_CREDENTIALS_KEY, "hex");
+}
+
+function criptografarSecretShopee(userId, secret) {
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv("aes-256-gcm", chaveCriptografiaShopee(), iv);
+  cipher.setAAD(Buffer.from(userId, "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
+  return { iv: iv.toString("hex"), tag: cipher.getAuthTag().toString("hex"), ciphertext: ciphertext.toString("hex") };
+}
+
+function descriptografarSecretShopee(userId, sealed) {
+  try {
+    const decipher = crypto.createDecipheriv("aes-256-gcm", chaveCriptografiaShopee(), Buffer.from(sealed.iv, "hex"));
+    decipher.setAAD(Buffer.from(userId, "utf8"));
+    decipher.setAuthTag(Buffer.from(sealed.tag, "hex"));
+    return Buffer.concat([decipher.update(Buffer.from(sealed.ciphertext, "hex")), decipher.final()]).toString("utf8");
+  } catch {
+    throw erroShopeeAuth("Não foi possível abrir as credenciais Shopee desta conta.", 503);
+  }
+}
+
+function derivarSenhaShopee(password, salt) {
+  return crypto.pbkdf2Sync(password, salt, SHOPEE_PASSWORD_ITERATIONS, 32, "sha256").toString("hex");
+}
+
+function limitarTentativaShopee(req, chave) {
+  const ip = req.socket?.remoteAddress || "unknown";
+  const id = `${ip}:${chave}`;
+  const agora = Date.now();
+  const registro = tentativasShopeeAuth.get(id) || { inicio: agora, quantidade: 0 };
+  if (agora - registro.inicio > 15 * 60 * 1000) {
+    registro.inicio = agora;
+    registro.quantidade = 0;
+  }
+  registro.quantidade++;
+  tentativasShopeeAuth.set(id, registro);
+  if (registro.quantidade > 15) throw erroShopeeAuth("Muitas tentativas. Aguarde 15 minutos.", 429);
+}
+
+async function lerBodyLimitado(req, limite = 8192) {
+  const partes = [];
+  let tamanho = 0;
+  for await (const parte of req) {
+    tamanho += Buffer.byteLength(parte);
+    if (tamanho > limite) throw erroShopeeAuth("Requisição muito grande.", 413);
+    partes.push(Buffer.from(parte));
+  }
+  try {
+    return JSON.parse(Buffer.concat(partes).toString("utf8") || "{}");
+  } catch {
+    throw erroShopeeAuth("JSON inválido.", 400);
+  }
+}
+
+function emitirSessaoShopee(dados, usuario) {
+  const token = crypto.randomBytes(32).toString("base64url");
+  const agora = Date.now();
+  dados.sessions = dados.sessions.filter(item =>
+    (item.authMode === "personal-device" && item.expiresAt === null) ||
+    (Number.isFinite(item.expiresAt) && item.expiresAt > agora)
+  );
+  dados.sessions.push({ tokenHash: hashShopeeAuth(token), userId: usuario.id, expiresAt: agora + SHOPEE_SESSION_TTL_MS });
+  salvarContasShopee(dados);
+  return { token, expiresAt: agora + SHOPEE_SESSION_TTL_MS, user: { email: usuario.email } };
+}
+
+function usuarioDaSessaoShopee(req) {
+  const cabecalho = String(req.headers.authorization || "");
+  const token = cabecalho.match(/^Bearer\s+([A-Za-z0-9_-]{40,80})$/)?.[1];
+  if (!token) return null;
+  const dados = lerContasShopee();
+  const digest = hashShopeeAuth(token);
+  const sessao = dados.sessions.find(item => segredoIgual(item.tokenHash, digest) &&
+    ((item.authMode === "personal-device" && item.expiresAt === null) ||
+      (Number.isFinite(item.expiresAt) && item.expiresAt > Date.now()))
+  );
+  if (!sessao) return null;
+  const usuario = dados.users.find(item => item.id === sessao.userId);
+  return usuario ? { usuario, dados } : null;
+}
+
+function exigirUsuarioShopee(req, res) {
+  const sessao = usuarioDaSessaoShopee(req);
+  if (sessao) return sessao;
+  res.setHeader("Cache-Control", "no-store");
+  responderJSON(res, 401, { sucesso: false, erro: "Sessão Shopee inválida ou expirada. Entre novamente." });
+  return null;
 }
 
 
@@ -660,6 +814,11 @@ function normalizarOferta(oferta) {
         oferta.preco_original_numerico ||
         0
       ),
+
+    mensagemWhatsApp:
+      typeof oferta.mensagemWhatsApp === "string" && oferta.mensagemWhatsApp.trim()
+        ? oferta.mensagemWhatsApp.trim().slice(0, 5000)
+        : null,
 
     status:
       "pendente",
@@ -963,6 +1122,8 @@ async function trocarCodePorToken(
 // ======================================================
 
 function criarAssinaturaShopee(
+  appId,
+  secret,
   payload
 ) {
 
@@ -974,7 +1135,7 @@ function criarAssinaturaShopee(
 
 
   const base =
-    `${SHOPEE_APP_ID}${timestamp}${payload}${SHOPEE_SECRET}`;
+    `${appId}${timestamp}${payload}${secret}`;
 
 
   const signature =
@@ -999,22 +1160,15 @@ function criarAssinaturaShopee(
 // ======================================================
 
 async function consultarShopee(
+  credenciais,
   query,
   variables = {}
 ) {
 
-  if (!SHOPEE_APP_ID) {
+  if (!credenciais?.appId || !credenciais?.secret) {
 
     throw new Error(
-      "SHOPEE_APP_ID não configurado."
-    );
-  }
-
-
-  if (!SHOPEE_SECRET) {
-
-    throw new Error(
-      "SHOPEE_SECRET não configurado."
+      "Credenciais Shopee não configuradas para esta conta."
     );
   }
 
@@ -1031,12 +1185,14 @@ async function consultarShopee(
     signature
   } =
     criarAssinaturaShopee(
+      credenciais.appId,
+      credenciais.secret,
       payload
     );
 
 
   const authorization =
-    `SHA256 Credential=${SHOPEE_APP_ID}, Timestamp=${timestamp}, Signature=${signature}`;
+    `SHA256 Credential=${credenciais.appId}, Timestamp=${timestamp}, Signature=${signature}`;
 
 
   const resposta =
@@ -1136,10 +1292,11 @@ const QUERY_PRODUTOS_SHOPEE =
 // SHOPEE - TESTE
 // ======================================================
 
-async function testarShopee() {
+async function validarCredenciaisShopee(credenciais) {
 
   const resposta =
     await consultarShopee(
+      credenciais,
       QUERY_PRODUTOS_SHOPEE,
       {
         page: 1,
@@ -1148,41 +1305,179 @@ async function testarShopee() {
     );
 
 
-  if (
-    resposta?.errors?.length
-  ) {
-
-    return {
-      sucesso: false,
-      errors:
-        resposta.errors
-    };
+  const bloco = resposta?.data?.productOfferV2;
+  if (resposta?.errors?.length || !Array.isArray(bloco?.nodes) || !bloco?.pageInfo) {
+    throw erroShopeeAuth("A Shopee não confirmou as credenciais. Confira App ID, Secret e acesso à Open API.", 400);
   }
+  return true;
+}
 
+function criptografiaShopeeConfigurada() {
+  return /^[a-f0-9]{64}$/i.test(SHOPEE_CREDENTIALS_KEY);
+}
 
-  const produto =
-    resposta
-      ?.data
-      ?.productOfferV2
-      ?.nodes
-      ?.[0] ||
-    null;
+function credencialDaContaShopee(userId) {
+  const armazenada = lerCredenciaisShopee()[userId];
+  if (!armazenada) return null;
+  return { appId: armazenada.appId, secret: descriptografarSecretShopee(userId, armazenada.secret) };
+}
 
+async function atenderContaShopee(req, res, caminho) {
+  res.setHeader("Cache-Control", "no-store");
+  try {
+    if (req.method === "POST" && caminho === "/shopee/device/enroll") {
+      limitarTentativaShopee(req, "device-enroll");
+      if (!/^[A-Za-z0-9_-]{40,100}$/.test(SHOPEE_DEVICE_ENROLLMENT_CODE)) {
+        throw erroShopeeAuth("Ativação pessoal não configurada no servidor.", 503);
+      }
+      if (!criptografiaShopeeConfigurada()) throw erroShopeeAuth("Servidor sem chave de criptografia Shopee configurada.", 503);
+      const body = await lerBodyLimitado(req, 2048);
+      if (!segredoIgual(String(body.code || ""), SHOPEE_DEVICE_ENROLLMENT_CODE)) {
+        throw erroShopeeAuth("Código de ativação inválido.", 401);
+      }
+      const dados = lerContasShopee();
+      const codeHash = hashShopeeAuth(String(body.code || ""));
+      if (dados.deviceEnrollmentUsed && dados.deviceEnrollmentCodeHash === codeHash) {
+        throw erroShopeeAuth("O código de ativação já foi usado.", 409);
+      }
+      let usuario = dados.users.find(item => item.authMode === "personal-device");
+      if (!usuario) {
+        usuario = { id: crypto.randomUUID(), email: null, authMode: "personal-device", createdAt: Date.now() };
+        dados.users.push(usuario);
+      }
+      const token = crypto.randomBytes(32).toString("base64url");
+      dados.sessions = dados.sessions.filter(item => item.authMode !== "personal-device");
+      dados.sessions.push({ tokenHash: hashShopeeAuth(token), userId: usuario.id, expiresAt: null, authMode: "personal-device" });
+      dados.deviceEnrollmentUsed = true;
+      dados.deviceEnrollmentCodeHash = codeHash;
+      salvarContasShopee(dados);
+      responderJSON(res, 201, { sucesso: true, token, user: { authMode: "personal-device" } });
+      return;
+    }
 
-  return {
+    if (req.method === "POST" && caminho === "/shopee/admin/invites") {
+      if (!SHOPEE_ACCOUNT_ADMIN_KEY || !segredoIgual(req.headers["x-shopee-admin-key"], SHOPEE_ACCOUNT_ADMIN_KEY)) {
+        responderJSON(res, 401, { sucesso: false, erro: "Não autorizado." });
+        return;
+      }
+      const body = await lerBodyLimitado(req, 2048);
+      const email = String(body.email || "").trim().toLowerCase();
+      if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw erroShopeeAuth("E-mail inválido.", 400);
+      const dados = lerContasShopee();
+      const inviteCode = crypto.randomBytes(32).toString("base64url");
+      const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000;
+      dados.invites.push({ tokenHash: hashShopeeAuth(inviteCode), email: email || null, expiresAt });
+      salvarContasShopee(dados);
+      responderJSON(res, 201, { sucesso: true, inviteCode, email: email || null, expiresAt });
+      return;
+    }
 
-    sucesso:
-      true,
+    if (req.method === "POST" && caminho === "/shopee/auth/register") {
+      limitarTentativaShopee(req, "register");
+      const body = await lerBodyLimitado(req, 4096);
+      const email = String(body.email || "").trim().toLowerCase();
+      const password = String(body.password || "");
+      const inviteCode = String(body.inviteCode || "");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw erroShopeeAuth("Informe um e-mail válido.", 400);
+      if (password.length < 12 || password.length > 256) throw erroShopeeAuth("A senha da conta precisa ter entre 12 e 256 caracteres.", 400);
+      const dados = lerContasShopee();
+      if (dados.users.some(item => item.email === email)) throw erroShopeeAuth("Não foi possível criar a conta com esses dados.", 409);
+      const inviteHash = hashShopeeAuth(inviteCode);
+      const indiceConvite = dados.invites.findIndex(item => item.tokenHash === inviteHash && item.expiresAt > Date.now() && (!item.email || item.email === email));
+      const primeiroCadastro = dados.users.length === 0 && !dados.bootstrapUsed && SHOPEE_BOOTSTRAP_TOKEN && segredoIgual(inviteCode, SHOPEE_BOOTSTRAP_TOKEN);
+      if (!primeiroCadastro && indiceConvite < 0) throw erroShopeeAuth("Convite inválido ou expirado.", 401);
+      if (primeiroCadastro) dados.bootstrapUsed = true;
+      else dados.invites.splice(indiceConvite, 1);
+      const salt = crypto.randomBytes(16).toString("hex");
+      const usuario = { id: crypto.randomUUID(), email, salt, passwordHash: derivarSenhaShopee(password, salt), createdAt: Date.now() };
+      dados.users.push(usuario);
+      const sessao = emitirSessaoShopee(dados, usuario);
+      responderJSON(res, 201, { sucesso: true, ...sessao });
+      return;
+    }
 
-    autenticado:
-      true,
+    if (req.method === "POST" && caminho === "/shopee/auth/login") {
+      limitarTentativaShopee(req, "login");
+      const body = await lerBodyLimitado(req, 4096);
+      const email = String(body.email || "").trim().toLowerCase();
+      const password = String(body.password || "");
+      const dados = lerContasShopee();
+      const usuario = dados.users.find(item => item.email === email);
+      const salt = usuario?.salt || "0".repeat(32);
+      const esperado = usuario?.passwordHash || "0".repeat(64);
+      const recebido = derivarSenhaShopee(password.slice(0, 256), salt);
+      if (!usuario || !segredoIgual(recebido, esperado)) throw erroShopeeAuth("E-mail ou senha incorretos.", 401);
+      responderJSON(res, 200, { sucesso: true, ...emitirSessaoShopee(dados, usuario) });
+      return;
+    }
 
-    mensagem:
-      "Shopee Affiliate API conectada.",
+    const sessao = exigirUsuarioShopee(req, res);
+    if (!sessao) return;
+    const { usuario, dados } = sessao;
 
-    produto_teste:
-      produto
-  };
+    if (req.method === "POST" && caminho === "/shopee/auth/logout") {
+      const token = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+      dados.sessions = dados.sessions.filter(item => item.tokenHash !== hashShopeeAuth(token));
+      salvarContasShopee(dados);
+      responderJSON(res, 200, { sucesso: true });
+      return;
+    }
+
+    if (req.method === "GET" && caminho === "/shopee/connection") {
+      const armazenada = lerCredenciaisShopee()[usuario.id];
+      responderJSON(res, 200, { sucesso: true, email: usuario.email, connected: Boolean(armazenada), appId: armazenada ? `••••${String(armazenada.appId).slice(-4)}` : null, encryptionReady: criptografiaShopeeConfigurada() });
+      return;
+    }
+
+    if (req.method === "POST" && caminho === "/shopee/connection") {
+      if (!criptografiaShopeeConfigurada()) throw erroShopeeAuth("Servidor sem chave de criptografia Shopee configurada.", 503);
+      const body = await lerBodyLimitado(req, 4096);
+      const appId = String(body.appId || "").trim();
+      const secret = String(body.secret || "").trim();
+      if (!/^\d{1,20}$/.test(appId) || secret.length < 8 || secret.length > 256) throw erroShopeeAuth("App ID ou Secret inválido.", 400);
+      try {
+        await validarCredenciaisShopee({ appId, secret });
+      } catch (erro) {
+        throw erroShopeeAuth(erro.statusCode === 503 ? erro.message : "A Shopee não validou as credenciais. Confira App ID, Secret e acesso à Open API.", erro.statusCode || 400);
+      }
+      const credenciais = lerCredenciaisShopee();
+      credenciais[usuario.id] = { appId, secret: criptografarSecretShopee(usuario.id, secret), updatedAt: Date.now() };
+      salvarCredenciaisShopee(credenciais);
+      responderJSON(res, 200, { sucesso: true, connected: true, appId: `••••${appId.slice(-4)}` });
+      return;
+    }
+
+    if (req.method === "DELETE" && caminho === "/shopee/connection") {
+      const credenciais = lerCredenciaisShopee();
+      delete credenciais[usuario.id];
+      salvarCredenciaisShopee(credenciais);
+      responderJSON(res, 200, { sucesso: true, connected: false });
+      return;
+    }
+
+    if (req.method === "GET" && caminho === "/shopee/teste") {
+      const credenciais = credencialDaContaShopee(usuario.id);
+      if (!credenciais) throw erroShopeeAuth("Conecte sua conta Shopee antes de validar.", 409);
+      await validarCredenciaisShopee(credenciais);
+      responderJSON(res, 200, { sucesso: true, connected: true });
+      return;
+    }
+
+    if (req.method === "GET" && caminho === "/shopee/ofertas") {
+      const credenciais = credencialDaContaShopee(usuario.id);
+      if (!credenciais) throw erroShopeeAuth("Conecte sua conta Shopee antes de buscar ofertas.", 409);
+      const quantidadeSolicitada = Number(new URL(req.url, `http://${req.headers.host}`).searchParams.get("quantidade") || 10);
+      const quantidade = Math.max(1, Math.min(50, Number.isFinite(quantidadeSolicitada) ? quantidadeSolicitada : 10));
+      const resultado = await buscarOfertasShopee(quantidade, credenciais);
+      responderJSON(res, 200, { sucesso: true, plataforma: "SHOPEE", solicitado: quantidade, candidatos_analisados: resultado.candidatos, total: resultado.ofertas.length, ofertas: resultado.ofertas });
+      return;
+    }
+
+    responderJSON(res, 404, { sucesso: false, erro: "Rota Shopee não encontrada." });
+  } catch (erro) {
+    const status = erro.statusCode || 500;
+    responderJSON(res, status, { sucesso: false, erro: status >= 500 ? (status === 503 ? erro.message : "Falha na operação Shopee.") : erro.message });
+  }
 }
 
 
@@ -1781,7 +2076,6 @@ function normalizarProdutoShopee(
   const link =
     String(
       produto.offerLink ||
-      produto.productLink ||
       ""
     ).trim();
 
@@ -1799,6 +2093,11 @@ function normalizarProdutoShopee(
       produto.priceDiscountRate ||
       0
     );
+
+  const descontoPercentual =
+    desconto > 0 && desconto <= 1
+      ? desconto * 100
+      : desconto;
 
 
   const vendas =
@@ -1877,6 +2176,14 @@ function normalizarProdutoShopee(
 
     desconto,
 
+    descontoVerificado:
+      Number.isFinite(descontoPercentual) && descontoPercentual > 0 && descontoPercentual < 100
+        ? `${Number(descontoPercentual.toFixed(2))}% de desconto`
+        : null,
+
+    descontoPercentualConfirmado:
+      Number.isFinite(descontoPercentual) && descontoPercentual > 0 && descontoPercentual < 100,
+
     loja:
       produto.shopName ||
       null,
@@ -1919,7 +2226,8 @@ function normalizarProdutoShopee(
 // ======================================================
 
 async function buscarCandidatosShopee(
-  quantidadeDesejada
+  quantidadeDesejada,
+  credenciais
 ) {
 
   const alvo =
@@ -1953,6 +2261,7 @@ async function buscarCandidatosShopee(
 
     const resposta =
       await consultarShopee(
+        credenciais,
         QUERY_PRODUTOS_SHOPEE,
         {
           page:
@@ -2533,7 +2842,8 @@ function selecionarMelhoresShopee(
 // ======================================================
 
 async function buscarOfertasShopee(
-  quantidade = 10
+  quantidade = 10,
+  credenciais
 ) {
 
   quantidade =
@@ -2551,7 +2861,8 @@ async function buscarOfertasShopee(
 
   const candidatos =
     await buscarCandidatosShopee(
-      quantidade
+      quantidade,
+      credenciais
     );
 
 
@@ -2826,6 +3137,10 @@ function resumoDisparador() {
 function formatarMensagemOferta(
   oferta
 ) {
+
+  if (typeof oferta?.mensagemWhatsApp === "string" && oferta.mensagemWhatsApp.trim()) {
+    return oferta.mensagemWhatsApp;
+  }
 
   const marketplace =
     String(
@@ -3362,9 +3677,8 @@ const server =
       res
     ) => {
 
-      aplicarCORS(
-        res
-      );
+      res.corsRequest = req;
+      aplicarCORS(res, req);
 
 
       // ==================================================
@@ -3403,6 +3717,11 @@ const server =
 
       if (caminho === "/pair" && (req.method === "POST" || req.method === "GET")) {
         await atenderPareamento(req, res);
+        return;
+      }
+
+      if (caminho.startsWith("/shopee/")) {
+        await atenderContaShopee(req, res, caminho);
         return;
       }
 
@@ -3449,12 +3768,7 @@ const server =
                 : "não autorizado",
 
             shopee:
-              (
-                SHOPEE_APP_ID &&
-                SHOPEE_SECRET
-              )
-                ? "configurada"
-                : "não configurada",
+              "conexão individual por conta",
 
             fila:
               fila.length,
@@ -3470,150 +3784,6 @@ const server =
               resumoDisparador()
           }
         );
-
-
-        return;
-      }
-
-
-// ======================================================
-// SHOPEE - TESTE
-// ======================================================
-
-      if (
-        req.method ===
-          "GET" &&
-        caminho ===
-          "/shopee/teste"
-      ) {
-
-        try {
-
-          const resultado =
-            await testarShopee();
-
-
-          responderJSON(
-            res,
-            resultado.sucesso
-              ? 200
-              : 400,
-            resultado
-          );
-        }
-
-        catch (erro) {
-
-          console.error(
-            "Erro teste Shopee:",
-            erro
-          );
-
-
-          responderJSON(
-            res,
-            500,
-            {
-
-              sucesso:
-                false,
-
-              erro:
-                erro.message
-            }
-          );
-        }
-
-
-        return;
-      }
-
-
-// ======================================================
-// SHOPEE - OFERTAS
-// ======================================================
-
-      if (
-        req.method ===
-          "GET" &&
-        caminho ===
-          "/shopee/ofertas"
-      ) {
-
-        try {
-
-          let quantidade =
-            Number(
-              url.searchParams.get(
-                "quantidade"
-              ) ||
-              10
-            );
-
-
-          quantidade =
-            Math.max(
-              1,
-              Math.min(
-                50,
-                quantidade
-              )
-            );
-
-
-          const resultado =
-            await buscarOfertasShopee(
-              quantidade
-            );
-
-
-          responderJSON(
-            res,
-            200,
-            {
-
-              sucesso:
-                true,
-
-              plataforma:
-                "SHOPEE",
-
-              solicitado:
-                quantidade,
-
-              candidatos_analisados:
-                resultado.candidatos,
-
-              total:
-                resultado.ofertas.length,
-
-              ofertas:
-                resultado.ofertas
-            }
-          );
-        }
-
-        catch (erro) {
-
-          console.error(
-            "Erro ofertas Shopee:",
-            erro
-          );
-
-
-          responderJSON(
-            res,
-            500,
-            {
-
-              sucesso:
-                false,
-
-              erro:
-                erro.message
-            }
-          );
-        }
 
 
         return;
@@ -5142,12 +5312,7 @@ const server =
 
           <p>
             Shopee:
-            ${
-              SHOPEE_APP_ID &&
-              SHOPEE_SECRET
-                ? "✅ configurada"
-                : "❌ não configurada"
-            }
+            conexão privada por conta de usuário
           </p>
 
           <p>
@@ -5192,29 +5357,7 @@ const server =
             segundos
           </p>
 
-          <p>
-            <a
-              href="/shopee/teste"
-              style="
-                color:#fb923c;
-                font-size:18px;
-              "
-            >
-              Testar API Shopee
-            </a>
-          </p>
-
-          <p>
-            <a
-              href="/shopee/ofertas?quantidade=10"
-              style="
-                color:#22c55e;
-                font-size:18px;
-              "
-            >
-              Buscar 10 ofertas selecionadas
-            </a>
-          </p>
+          <p>API Shopee: conecte e busque ofertas pela extensão, usando sua sessão individual.</p>
 
         </body>
         `
