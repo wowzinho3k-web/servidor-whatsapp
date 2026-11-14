@@ -56,6 +56,8 @@ const ML_OAUTH_FILE =
 const SHOPEE_ENDPOINT =
   "https://open-api.affiliate.shopee.com.br/graphql";
 
+const SHOPEE_APP_ID = process.env.SHOPEE_APP_ID || "";
+const SHOPEE_SECRET = process.env.SHOPEE_SECRET || "";
 const SHOPEE_USERS_FILE = "/data/shopee-users.json";
 const SHOPEE_CREDENTIALS_FILE = "/data/shopee-credentials.json";
 const SHOPEE_CREDENTIALS_KEY = process.env.SHOPEE_CREDENTIALS_KEY || "";
@@ -1316,10 +1318,26 @@ function criptografiaShopeeConfigurada() {
   return /^[a-f0-9]{64}$/i.test(SHOPEE_CREDENTIALS_KEY);
 }
 
-function credencialDaContaShopee(userId) {
+function credencialDaContaShopee(usuario) {
+  const credenciaisAmbiente = credenciaisAmbienteShopee();
+  if (usuario?.authMode === "personal-device" && credenciaisAmbiente) return credenciaisAmbiente;
+
+  const userId = usuario?.id;
+  if (!userId) return null;
   const armazenada = lerCredenciaisShopee()[userId];
   if (!armazenada) return null;
   return { appId: armazenada.appId, secret: descriptografarSecretShopee(userId, armazenada.secret) };
+}
+
+function credenciaisAmbienteShopee() {
+  const appId = SHOPEE_APP_ID.trim();
+  const secret = SHOPEE_SECRET.trim();
+  if (!/^\d{1,20}$/.test(appId) || secret.length < 8 || secret.length > 256) return null;
+  return { appId, secret };
+}
+
+function chaveAdminShopeeValida(value) {
+  return /^[A-Za-z0-9_-]{43,100}$/.test(SHOPEE_ACCOUNT_ADMIN_KEY) && segredoIgual(value, SHOPEE_ACCOUNT_ADMIN_KEY);
 }
 
 async function atenderContaShopee(req, res, caminho) {
@@ -1327,6 +1345,7 @@ async function atenderContaShopee(req, res, caminho) {
   try {
     if (req.method === "POST" && caminho === "/shopee/device/enroll") {
       limitarTentativaShopee(req, "device-enroll");
+      if (!chaveAdminShopeeValida(req.headers["x-shopee-admin-key"])) throw erroShopeeAuth("Não autorizado.", 401);
       if (!/^[A-Za-z0-9_-]{40,100}$/.test(SHOPEE_DEVICE_ENROLLMENT_CODE)) {
         throw erroShopeeAuth("Ativação pessoal não configurada no servidor.", 503);
       }
@@ -1350,6 +1369,33 @@ async function atenderContaShopee(req, res, caminho) {
       dados.sessions.push({ tokenHash: hashShopeeAuth(token), userId: usuario.id, expiresAt: null, authMode: "personal-device" });
       dados.deviceEnrollmentUsed = true;
       dados.deviceEnrollmentCodeHash = codeHash;
+      salvarContasShopee(dados);
+      responderJSON(res, 201, { sucesso: true, token, user: { authMode: "personal-device" } });
+      return;
+    }
+
+    if (req.method === "POST" && caminho === "/shopee/admin/device/provision") {
+      limitarTentativaShopee(req, "device-provision");
+      if (!chaveAdminShopeeValida(req.headers["x-shopee-admin-key"])) throw erroShopeeAuth("Não autorizado.", 401);
+      const credenciais = credenciaisAmbienteShopee();
+      if (!credenciais) throw erroShopeeAuth("Credenciais Shopee pessoais não configuradas no servidor.", 503);
+      try {
+        await validarCredenciaisShopee(credenciais);
+      } catch (erro) {
+        throw erroShopeeAuth(erro.statusCode === 503 ? erro.message : "A Shopee não validou as credenciais configuradas no servidor.", erro.statusCode || 400);
+      }
+
+      const dados = lerContasShopee();
+      let usuario = dados.users.find(item => item.authMode === "personal-device");
+      if (!usuario) {
+        usuario = { id: crypto.randomUUID(), email: null, authMode: "personal-device", createdAt: Date.now() };
+        dados.users.push(usuario);
+      }
+      // Uma nova ativação administrativa substitui a sessão pessoal anterior;
+      // as contas comerciais e suas sessões não são afetadas.
+      dados.sessions = dados.sessions.filter(item => item.userId !== usuario.id);
+      const token = crypto.randomBytes(32).toString("base64url");
+      dados.sessions.push({ tokenHash: hashShopeeAuth(token), userId: usuario.id, expiresAt: null, authMode: "personal-device", createdAt: Date.now() });
       salvarContasShopee(dados);
       responderJSON(res, 201, { sucesso: true, token, user: { authMode: "personal-device" } });
       return;
@@ -1424,8 +1470,8 @@ async function atenderContaShopee(req, res, caminho) {
     }
 
     if (req.method === "GET" && caminho === "/shopee/connection") {
-      const armazenada = lerCredenciaisShopee()[usuario.id];
-      responderJSON(res, 200, { sucesso: true, email: usuario.email, connected: Boolean(armazenada), appId: armazenada ? `••••${String(armazenada.appId).slice(-4)}` : null, encryptionReady: criptografiaShopeeConfigurada() });
+      const credenciais = credencialDaContaShopee(usuario);
+      responderJSON(res, 200, { sucesso: true, email: usuario.email, connected: Boolean(credenciais), appId: credenciais ? `••••${String(credenciais.appId).slice(-4)}` : null, encryptionReady: criptografiaShopeeConfigurada() });
       return;
     }
 
@@ -1456,7 +1502,7 @@ async function atenderContaShopee(req, res, caminho) {
     }
 
     if (req.method === "GET" && caminho === "/shopee/teste") {
-      const credenciais = credencialDaContaShopee(usuario.id);
+      const credenciais = credencialDaContaShopee(usuario);
       if (!credenciais) throw erroShopeeAuth("Conecte sua conta Shopee antes de validar.", 409);
       await validarCredenciaisShopee(credenciais);
       responderJSON(res, 200, { sucesso: true, connected: true });
@@ -1464,7 +1510,7 @@ async function atenderContaShopee(req, res, caminho) {
     }
 
     if (req.method === "GET" && caminho === "/shopee/ofertas") {
-      const credenciais = credencialDaContaShopee(usuario.id);
+      const credenciais = credencialDaContaShopee(usuario);
       if (!credenciais) throw erroShopeeAuth("Conecte sua conta Shopee antes de buscar ofertas.", 409);
       const quantidadeSolicitada = Number(new URL(req.url, `http://${req.headers.host}`).searchParams.get("quantidade") || 10);
       const quantidade = Math.max(1, Math.min(50, Number.isFinite(quantidadeSolicitada) ? quantidadeSolicitada : 10));

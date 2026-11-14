@@ -6,21 +6,22 @@ o servidor antigo não substitui esta versão.
 
 ## API oficial de afiliados Shopee
 
-A extensão envia App ID e Secret somente ao backend por HTTPS. O Secret não é
-gravado no Chrome nem devolvido pela API. O servidor valida as credenciais com
-`productOfferV2` e só então grava o Secret cifrado com AES-256-GCM, vinculado ao
-ID gerado pelo servidor. A chave de cifragem fica somente em variável de
-ambiente. O fluxo comercial usa contas com senha PBKDF2 e sessões temporárias; a
-instalação pessoal usa um código de ativação de uso único e token de dispositivo.
+A instalação pessoal pode fornecer as credenciais da conta pelo ambiente do
+backend. O Secret não é enviado ao Chrome nem devolvido pela API; o servidor faz
+a assinatura SHA256 e valida as credenciais com `productOfferV2`. Essas
+credenciais de ambiente são aceitas somente para uma sessão `personal-device`
+autenticada. Contas comerciais continuam usando credenciais próprias cifradas
+com AES-256-GCM, vinculadas ao ID gerado pelo servidor.
 
 Antes de iniciar o servidor com a nova integração, configure no ambiente do
 backend:
 
 ```text
 SHOPEE_CREDENTIALS_KEY=<64 caracteres hexadecimais aleatórios, 32 bytes>
-SHOPEE_DEVICE_ENROLLMENT_CODE=<código aleatório de ativação, usado uma vez>
+SHOPEE_APP_ID=<App ID numérico da conta pessoal>
+SHOPEE_SECRET=<Secret da API da conta pessoal>
 SHOPEE_BOOTSTRAP_TOKEN=<token de bootstrap do fluxo comercial, se usado>
-SHOPEE_ACCOUNT_ADMIN_KEY=<token administrativo aleatório>
+SHOPEE_ACCOUNT_ADMIN_KEY=<chave administrativa aleatória, 32 bytes em base64url>
 SHOPEE_ALLOWED_ORIGINS=chrome-extension://<ID-DA-EXTENSAO>
 ```
 
@@ -31,19 +32,35 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 ```
 
-Use o formato hexadecimal para `SHOPEE_CREDENTIALS_KEY`. Para a instalação
-pessoal, gere um `SHOPEE_DEVICE_ENROLLMENT_CODE` com 32 bytes aleatórios e
-configure-o somente no ambiente do backend; não o inclua na extensão. Na
-primeira conexão, o botão pede esse código uma única vez. O servidor valida e
-consome o código, cria a identidade do dispositivo e entrega um token aleatório
-cujo hash fica no servidor. A extensão conserva esse token em
-`chrome.storage.local` para não pedir ativação a cada abertura; o Secret da API
-Shopee nunca é salvo no Chrome. A ativação falha se a chave de cifragem não
-estiver configurada. A marca de uso é persistida em `/data/shopee-users.json`.
-Se o perfil do Chrome for perdido ou a extensão reinstalada, gere um código
-novo e substitua `SHOPEE_DEVICE_ENROLLMENT_CODE` no backend antes de reiniciar
-o servidor. O novo pareamento revoga o token anterior e mantém as credenciais da
-conta pessoal.
+Use o formato hexadecimal para `SHOPEE_CREDENTIALS_KEY`; ela protege somente as
+credenciais individuais armazenadas pelo fluxo comercial. Na instalação
+pessoal, `SHOPEE_APP_ID` e `SHOPEE_SECRET` ficam exclusivamente nas variáveis
+secretas da Deplexo. O painel da extensão não cadastra esses valores. A
+extensão usa o token Bearer pessoal já provisionado e salvo em
+`chrome.storage.local`; o backend valida esse token e consulta a Open API. Se o
+perfil do Chrome for perdido ou a extensão for instalada novamente sem o token,
+a busca permanece desabilitada. Não distribua um token compartilhado nem use
+`SEND_KEY` como identidade; provisionar uma nova instalação exige um processo
+administrativo seguro fora da extensão.
+
+`SHOPEE_ACCOUNT_ADMIN_KEY` deve ser uma chave aleatória de 32 bytes em base64url
+(43 caracteres). A rota `POST /shopee/admin/device/provision` exige essa chave
+no cabeçalho `x-shopee-admin-key`, aplica limitação de tentativas e valida as
+credenciais configuradas com a GraphQL da Shopee antes de emitir um token
+pessoal. Sem chave correta, não cria sessão nem chama a Shopee. A resposta é
+`no-store`; o backend grava apenas o hash SHA-256 do token em
+`/data/shopee-users.json`. A rota antiga `/shopee/device/enroll` também exige a
+chave administrativa além do código de uso único. CORS e ID da extensão não
+substituem essa autenticação. Nunca inclua a chave administrativa no código ou
+nas configurações da extensão.
+
+Para ativar a extensão após provisionar o token, use o Chrome DevTools na origem
+da extensão e abra **Application → Storage → Extension Storage → Local**. Crie
+a chave `shopeeDeviceToken` com o token retornado. O Chrome oferece edição da
+`chrome.storage` nessa área desde a versão 132. Recarregue a extensão; o popup
+valida a sessão no servidor e faz uma consulta GraphQL antes de habilitar a
+busca. Se a sessão já existir e estiver válida, não faça novo provisionamento:
+isso revoga o token pessoal anterior.
 
 Configure a origem exata da extensão em `SHOPEE_ALLOWED_ORIGINS` (e a origem de
 desenvolvimento, se usada). O código de ativação não é uma rota de configuração
@@ -53,15 +70,45 @@ e convites continuam disponíveis para o futuro fluxo comercial com contas
 individuais. O endpoint administrativo de convites usa exclusivamente a chave
 do backend, nunca distribuída à extensão.
 
-Os dados persistidos ficam em `/data/shopee-users.json` e
-`/data/shopee-credentials.json`, ambos gravados com permissão restrita e
-substituição atômica. Faça backup de `/data` e mantenha a chave de cifragem fora
-desse volume. Perder a chave impede descriptografar os Secrets armazenados.
+Os dados persistidos incluem sessões Baileys, fila, configuração do disparador,
+tokens OAuth e arquivos Shopee. O volume persistente `/data` não é um backup.
+Use a ferramenta administrativa local abaixo para criar um arquivo cifrado; a
+chave de backup deve ficar fora do volume e do repositório. A ferramenta não
+cria rotas HTTP e não publica arquivos de sessão ou credenciais.
 
-`/shopee/device/enroll` aceita somente o código pessoal de uso único;
+### Backup e restauração administrativa de `/data`
+
+Execute estes comandos no container/host que contém `/data`, em janela de
+manutenção, com o disparador pausado e o processo do servidor parado. Gere e
+guarde `DATA_BACKUP_KEY` num cofre de segredos, separado do arquivo de backup:
+
+```sh
+export DATA_BACKUP_KEY="$(node -e 'process.stdout.write(require("crypto").randomBytes(32).toString("hex"))')"
+umask 077
+node scripts/data-volume.mjs export /caminho-seguro/achadinhos-data-$(date -u +%Y%m%dT%H%M%SZ).backup
+```
+
+Restaure somente com o servidor parado, a mesma chave fora do backup e depois
+de conferir que o arquivo veio de armazenamento confiável. O programa valida a
+autenticação AES-GCM antes de alterar `/data`, preserva a versão anterior dentro
+do volume em `.before-restore-*` e exige confirmação explícita:
+
+```sh
+export DATA_BACKUP_KEY='<mesma chave hexadecimal de 64 caracteres, obtida do cofre>'
+node scripts/data-volume.mjs restore /caminho-seguro/achadinhos-data-AAAAMMDDTHHMMSSZ.backup --confirm-volume-replacement
+```
+
+Após restaurar, confira a fila, a pasta Baileys selecionada em
+`/data/whatsapp-connection.json`, os arquivos de sessão e as configurações antes
+de iniciar uma única instância. Não troque nem regenere `SHOPEE_CREDENTIALS_KEY`;
+sem a chave original as credenciais Shopee comerciais cifradas não podem ser
+abertas. A restauração de um backup antigo também restaura as sessões daquele
+instante e pode revogar sessões criadas depois dele.
+
 `/shopee/connection`, `/shopee/teste` e `/shopee/ofertas` exigem token Bearer
 emitido pelo backend e nunca confiam em `userId` enviado pelo navegador nem em
-`SEND_KEY`. O fluxo individual mantém `/shopee/auth/register` e
+`SEND_KEY`. O provisionamento administrativo de dispositivo usa
+`SHOPEE_ACCOUNT_ADMIN_KEY`; não faz parte do fluxo comercial. O fluxo individual mantém `/shopee/auth/register` e
 `/shopee/auth/login`. Rotas Shopee aplicam allowlist CORS separada; a consulta
 GraphQL roda no servidor, com credenciais cifradas por identidade autenticada, e
 a busca preserva `offerLink` da Shopee.
@@ -168,11 +215,27 @@ reais e não enviam mensagens. Incluem preservação das rotas/integrações con
 commit-base `492cfd7a23622c91abe16dddee9a3ed55e2634ff`; por isso precisam do checkout
 Git com esse histórico disponível.
 
-`package.json` permanece inalterado e declara Baileys como `latest`, sem lockfile
-no repositório. A versão instalada na Deplexo não foi consultada. Os testes simulados
-não substituem uma validação posterior com a versão efetiva do ambiente, após
-autorização para publicar e vincular. `npm start` inicia o servidor real e não deve
-ser usado para essa verificação isolada.
+O `package-lock.json` fixa as dependências e a instalação requer Node.js 20.11 ou
+superior. A versão instalada na Deplexo não foi consultada. Os testes simulados
+não substituem uma validação posterior com a versão efetiva do ambiente. `npm
+start` inicia o servidor real e não deve ser usado para verificação isolada.
+
+### Publicação manual e rollback
+
+Com Auto Deploy desativado, publicar o commit no repositório não reinicia a
+Deplexo. Faça a janela de manutenção manualmente: pause o disparador no painel,
+gere um backup criptografado como acima, registre o commit atual e publique o
+código. No painel da Deplexo selecione **Deploy/Redeploy manual** para o commit
+novo e aguarde a verificação de saúde. Não remova nem recrie o volume `/data`;
+isso preserva sessões WhatsApp, fila e configurações. Faça smoke checks de
+`/status`, conexão WhatsApp e contagem da fila, sem iniciar envios reais.
+
+Se a versão nova falhar, pare o serviço, selecione no painel o commit anterior e
+faça novo deploy manual com o mesmo volume `/data`. Não restaure o backup apenas
+por falha de código; o rollback de código mantém os dados atuais. Restaure o
+backup somente se os próprios dados tiverem sido danificados, sempre com o
+servidor parado e usando o procedimento acima. Retome o disparador apenas depois
+de confirmar WhatsApp, fila e estado desejado.
 
 Referências oficiais:
 

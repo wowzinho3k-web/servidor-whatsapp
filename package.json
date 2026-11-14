@@ -4,7 +4,10 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/*.test.mjs",
+    "data:export": "node scripts/data-volume.mjs export",
+    "data:restore": "node scripts/data-volume.mjs restore"
   },
   "engines": {
     "node": ">=20.11.0"

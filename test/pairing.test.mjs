@@ -27,7 +27,8 @@ const close = (socket, code) => socket.ev.emit('connection.update', {
 
 async function fixture({ registered = false, files: initialFiles, autoReady = true,
   requestCode, saveFailure = false, writeFailure = false, key = 'test-secret', fetchShopee,
-  shopeeEncryptionKey = 'a'.repeat(64), shopeeDeviceEnrollmentCode = 'simulated-personal-device-enrollment-code-1234567890' } = {}) {
+  shopeeEncryptionKey = 'a'.repeat(64), shopeeDeviceEnrollmentCode = 'simulated-personal-device-enrollment-code-1234567890',
+  shopeeAppId = '', shopeeSecret = '' } = {}) {
   const files = new Map(initialFiles || [
     [legacyDir + '/creds.json', JSON.stringify({ registered })],
     [legacyDir + '/session-keep.json', 'preservar esta sessão'],
@@ -57,9 +58,11 @@ async function fixture({ registered = false, files: initialFiles, autoReady = tr
     process: { env: {
       SEND_KEY: key,
       SHOPEE_CREDENTIALS_KEY: shopeeEncryptionKey,
+      SHOPEE_APP_ID: shopeeAppId,
+      SHOPEE_SECRET: shopeeSecret,
       SHOPEE_BOOTSTRAP_TOKEN: 'simulated-bootstrap-invite',
       SHOPEE_DEVICE_ENROLLMENT_CODE: shopeeDeviceEnrollmentCode,
-      SHOPEE_ACCOUNT_ADMIN_KEY: 'simulated-admin-key',
+      SHOPEE_ACCOUNT_ADMIN_KEY: 'simulated-admin-key-01234567890123456789012345678901234567890',
       SHOPEE_ALLOWED_ORIGINS: 'chrome-extension://test-extension'
     } },
     console: { log() {}, error() {} },
@@ -470,7 +473,7 @@ test('contas Shopee usam autenticação real, credenciais criptografadas e isola
   assert.ok(!armazenamento.includes('senha-forte-simulada-1'));
   assert.ok(!armazenamento.includes(sessao1));
 
-  const convite = await f.request('/shopee/admin/invites', { method: 'POST', adminKey: 'simulated-admin-key', body: { email: 'dois@example.test' } });
+  const convite = await f.request('/shopee/admin/invites', { method: 'POST', adminKey: 'simulated-admin-key-01234567890123456789012345678901234567890', body: { email: 'dois@example.test' } });
   assert.equal(convite.code, 201);
   const registro2 = await f.request('/shopee/auth/register', { method: 'POST', auth: null,
     body: { email: 'dois@example.test', password: 'senha-forte-simulada-2', inviteCode: convite.json.inviteCode } });
@@ -531,9 +534,11 @@ test('ativação pessoal usa código de uso único e token duradouro sem identid
     return JSON.stringify({ data: { productOfferV2: { nodes: [], pageInfo: { page: 1, limit: 1, hasNextPage: false } } } });
   } }) });
   const codigo = 'simulated-personal-device-enrollment-code-1234567890';
-  assert.equal((await f.request('/shopee/device/enroll', { method: 'POST', auth: null, body: { code: 'wrong-code' } })).code, 401);
+  const adminKey = 'simulated-admin-key-01234567890123456789012345678901234567890';
+  assert.equal((await f.request('/shopee/device/enroll', { method: 'POST', auth: null, body: { code: codigo } })).code, 401, 'rota de ativação rejeita chamada sem chave administrativa');
+  assert.equal((await f.request('/shopee/device/enroll', { method: 'POST', auth: null, adminKey, body: { code: 'wrong-code' } })).code, 401);
   const ativacao = await f.request('/shopee/device/enroll', { method: 'POST', auth: null,
-    body: { code: codigo, userId: 'id-arbitrario-controlado-pelo-cliente' } });
+    adminKey, body: { code: codigo, userId: 'id-arbitrario-controlado-pelo-cliente' } });
   assert.equal(ativacao.code, 201);
   const token = ativacao.json.token;
   assert.ok(token);
@@ -545,7 +550,7 @@ test('ativação pessoal usa código de uso único e token duradouro sem identid
   assert.equal((await f.request('/shopee/connection', { bearer: token })).json.connected, false);
   f.advance(400 * 24 * 60 * 60 * 1000);
   assert.equal((await f.request('/shopee/connection', { bearer: token })).code, 200, 'token do dispositivo não expira em cada abertura');
-  assert.equal((await f.request('/shopee/device/enroll', { method: 'POST', auth: null, body: { code: codigo } })).code, 409);
+  assert.equal((await f.request('/shopee/device/enroll', { method: 'POST', auth: null, adminKey, body: { code: codigo } })).code, 409);
   const connected = await f.request('/shopee/connection', { method: 'POST', bearer: token,
     body: { appId: '555555', secret: 'simulated-personal-api-secret' } });
   assert.equal(connected.code, 200);
@@ -554,7 +559,7 @@ test('ativação pessoal usa código de uso único e token duradouro sem identid
 
   const novoCodigo = 'simulated-personal-device-enrollment-code-rotated-9876543210';
   const recuperacao = await fixture({ files: [...f.files.entries()], shopeeDeviceEnrollmentCode: novoCodigo });
-  const novoDispositivo = await recuperacao.request('/shopee/device/enroll', { method: 'POST', auth: null, body: { code: novoCodigo } });
+  const novoDispositivo = await recuperacao.request('/shopee/device/enroll', { method: 'POST', auth: null, adminKey, body: { code: novoCodigo } });
   assert.equal(novoDispositivo.code, 201, 'código rotacionado permite recuperar uma instalação reinstalada');
   assert.equal((await recuperacao.request('/shopee/connection', { bearer: token })).code, 401, 'token anterior é revogado ao reativar o dispositivo');
 });
@@ -570,6 +575,45 @@ test('falha fechada se o backend não tiver chave de cifragem configurada', asyn
     body: { appId: '333333', secret: 'secret-shopee-simulado-tres' } });
   assert.equal(response.code, 503);
   assert.equal(f.files.has('/data/shopee-credentials.json'), false);
+});
+
+test('credenciais de ambiente servem somente ao dispositivo pessoal autenticado e passam por validação GraphQL', async () => {
+  const chamadas = [];
+  const f = await fixture({ shopeeAppId: '333333', shopeeSecret: 'simulated-env-secret-shopee', fetchShopee: async (url, options) => {
+    chamadas.push({ url, options });
+    return { ok: true, status: 200, async text() { return JSON.stringify({ data: { productOfferV2: { nodes: [], pageInfo: { page: 1, limit: 1, hasNextPage: false } } } }); } };
+  } });
+  const adminKey = 'simulated-admin-key-01234567890123456789012345678901234567890';
+  const semAdmin = await f.request('/shopee/admin/device/provision', { method: 'POST', auth: null });
+  assert.equal(semAdmin.code, 401);
+  assert.equal(chamadas.length, 0);
+  const ativacao = await f.request('/shopee/admin/device/provision', { method: 'POST', auth: null, adminKey });
+  assert.equal(ativacao.code, 201);
+  const bearer = ativacao.json.token;
+  const semIdentidade = await f.request('/shopee/connection');
+  assert.equal(semIdentidade.code, 401);
+  const status = await f.request('/shopee/connection', { bearer });
+  assert.equal(status.code, 200);
+  assert.equal(status.json.connected, true);
+  const validacao = await f.request('/shopee/teste', { bearer });
+  assert.equal(validacao.code, 200);
+  assert.equal(validacao.json.connected, true);
+  assert.equal(chamadas.length, 2, 'provisionamento e validação de conexão consultam GraphQL no servidor');
+  assert.equal(chamadas[0].url, 'https://open-api.affiliate.shopee.com.br/graphql');
+  assert.match(chamadas[0].options.headers.Authorization, /^SHA256 Credential=333333,/);
+  assert.doesNotMatch(JSON.stringify(status.json), /simulated-env-secret-shopee/);
+  assert.equal(f.files.has('/data/shopee-credentials.json'), false);
+  assert.equal(JSON.stringify(JSON.parse(f.files.get('/data/shopee-users.json'))).includes(bearer), false, 'backend persiste somente o hash do Bearer');
+});
+
+test('credenciais de ambiente não são herdadas por contas comerciais', async () => {
+  const f = await fixture({ shopeeAppId: '333333', shopeeSecret: 'simulated-env-secret-shopee' });
+  const registro = await f.request('/shopee/auth/register', { method: 'POST', auth: null,
+    body: { email: 'comercial@example.test', password: 'senha-forte-simulada-4', inviteCode: 'simulated-bootstrap-invite' } });
+  assert.equal(registro.code, 201);
+  const status = await f.request('/shopee/connection', { bearer: registro.json.token });
+  assert.equal(status.code, 200);
+  assert.equal(status.json.connected, false);
 });
 
 test('rotas originais e implementações das integrações permanecem preservadas', () => {
