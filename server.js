@@ -2952,7 +2952,10 @@ async function enviarOfertaWhatsApp(
     try {
       midiaAmazon = await prepararImagemAmazon(imagemOriginal);
       imagem = midiaAmazon.buffer;
-      console.info("Imagem Amazon baixada e decodificada; bytes originais preservados.", {
+      console.info("Imagem Amazon validada e preparada para o Baileys.", {
+        sourceMime: midiaAmazon.sourceMime,
+        sourceBytes: midiaAmazon.sourceBytes,
+        outputMime: midiaAmazon.mimetype,
         bytes: midiaAmazon.bytes,
         width: midiaAmazon.width,
         height: midiaAmazon.height,
@@ -2984,6 +2987,8 @@ async function enviarOfertaWhatsApp(
       );
       if (ofertaAmazon && midiaAmazon) {
         console.info("Baileys aceitou o envio da mídia Amazon; download pelo destinatário não confirmado.", {
+          sourceMime: midiaAmazon.sourceMime,
+          sourceBytes: midiaAmazon.sourceBytes,
           bytes: midiaAmazon.bytes,
           sha256Prefix: midiaAmazon.sha256.slice(0, 16)
         });
@@ -5024,7 +5029,10 @@ const server =
             try {
               midiaAmazon = await prepararImagemAmazon(imagemOriginal);
               imagem = midiaAmazon.buffer;
-              console.info("Imagem Amazon baixada e decodificada para /send; bytes originais preservados.", {
+              console.info("Imagem Amazon validada e preparada para /send.", {
+                sourceMime: midiaAmazon.sourceMime,
+                sourceBytes: midiaAmazon.sourceBytes,
+                outputMime: midiaAmazon.mimetype,
                 bytes: midiaAmazon.bytes,
                 width: midiaAmazon.width,
                 height: midiaAmazon.height,
@@ -5063,6 +5071,8 @@ const server =
               imagemEnviada = true;
               if (ofertaAmazon && midiaAmazon) {
                 console.info("Baileys aceitou o envio da mídia Amazon em /send; download pelo destinatário não confirmado.", {
+                  sourceMime: midiaAmazon.sourceMime,
+                  sourceBytes: midiaAmazon.sourceBytes,
                   bytes: midiaAmazon.bytes,
                   sha256Prefix: midiaAmazon.sha256.slice(0, 16)
                 });

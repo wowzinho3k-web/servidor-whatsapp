@@ -84,7 +84,7 @@ export async function prepararImagemAmazon(imageUrl, fetchImpl = fetch, sharpImp
     response = await fetchImpl(allowedUrl, {
       redirect: "error",
       signal: AbortSignal.timeout(10000),
-      headers: { Accept: "image/jpeg" }
+      headers: { Accept: "image/avif,image/jpeg;q=0.9" }
     });
   } catch {
     throw failure("download_falhou");
@@ -96,7 +96,7 @@ export async function prepararImagemAmazon(imageUrl, fetchImpl = fetch, sharpImp
 
   const contentType = String(response.headers?.get?.("content-type") || "")
     .split(";", 1)[0].trim().toLowerCase();
-  if (contentType !== "image/jpeg") throw failure("mime_nao_suportado");
+  if (contentType !== "image/jpeg" && contentType !== "image/avif") throw failure("mime_nao_suportado");
 
   let original;
   try {
@@ -109,7 +109,11 @@ export async function prepararImagemAmazon(imageUrl, fetchImpl = fetch, sharpImp
   try {
     const options = { failOn: "warning", limitInputPixels: MAX_PIXELS };
     const metadata = await sharpImpl(original, options).metadata();
-    if (metadata.format !== "jpeg") throw failure("mime_conteudo_divergente");
+    const sourceMime = metadata.mediaType;
+    if ((metadata.format !== "jpeg" && !(metadata.format === "heif" && sourceMime === "image/avif")) ||
+        sourceMime !== contentType) {
+      throw failure("mime_conteudo_divergente");
+    }
 
     const width = Number(metadata.autoOrient?.width || metadata.width);
     const height = Number(metadata.autoOrient?.height || metadata.height);
@@ -118,15 +122,21 @@ export async function prepararImagemAmazon(imageUrl, fetchImpl = fetch, sharpImp
       throw failure("resolucao_insuficiente_ou_invalida");
     }
 
-    // stats forces a full decode. The original bytes remain untouched for Baileys.
+    // stats forces a full decode before preserving JPEG or converting AVIF.
     await sharpImpl(original, options).stats();
+    const buffer = sourceMime === "image/avif"
+      ? await sharpImpl(original, options).rotate().jpeg({ quality: 90 }).toBuffer()
+      : original;
+    if (buffer.length > MAX_BYTES) throw failure("imagem_preparada_acima_do_limite");
     return {
-      buffer: original,
+      buffer,
       mimetype: "image/jpeg",
+      sourceMime,
+      sourceBytes: original.length,
       width,
       height,
-      bytes: original.length,
-      sha256: createHash("sha256").update(original).digest("hex")
+      bytes: buffer.length,
+      sha256: createHash("sha256").update(buffer).digest("hex")
     };
   } catch (error) {
     if (error?.amazonImageCode) throw error;

@@ -13,6 +13,21 @@ const sharp = require(process.env.SHARP_TEST_MODULE || 'sharp');
 
 const amazonUrl = 'https://m.media-amazon.com/images/I/test-product.jpg';
 
+async function createAvifSample() {
+  const width = 800;
+  const height = 900;
+  const pixels = Buffer.alloc(width * height * 3);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      const offset = (y * width + x) * 3;
+      pixels[offset] = (x * 7 + y * 3) % 256;
+      pixels[offset + 1] = (x * y) % 256;
+      pixels[offset + 2] = (x ^ y) % 256;
+    }
+  }
+  return sharp(pixels, { raw: { width, height, channels: 3 } }).avif({ quality: 82 }).toBuffer();
+}
+
 function imageResponse(bytes, { status = 200, contentType = 'image/jpeg', contentLength = bytes.length } = {}) {
   return {
     ok: status >= 200 && status < 300,
@@ -49,13 +64,42 @@ test('Amazon envia o buffer JPEG original, validado sem conversão', async () =>
   }, sharp);
   assert.equal(requestedUrl, amazonUrl);
   assert.equal(requestOptions.redirect, 'error');
-  assert.equal(requestOptions.headers.Accept, 'image/jpeg');
+  assert.equal(requestOptions.headers.Accept, 'image/avif,image/jpeg;q=0.9');
   assert.equal(result.mimetype, 'image/jpeg');
+  assert.equal(result.sourceMime, 'image/jpeg');
+  assert.equal(result.sourceBytes, input.length);
   assert.equal(result.width, 800);
   assert.equal(result.height, 900);
   assert.equal(result.bytes, input.length);
   assert.equal(result.sha256, crypto.createHash('sha256').update(input).digest('hex'));
   assert.equal(Buffer.compare(result.buffer, input), 0, 'payload conserva todos os bytes do JPEG de origem');
+});
+
+test('Amazon identifica AVIF real pelo conteúdo apesar da URL .jpg e converte para JPEG sem ampliar', async () => {
+  const input = await createAvifSample();
+  const inputMetadata = await sharp(input).metadata();
+  assert.equal(inputMetadata.mediaType, 'image/avif');
+  assert.ok(input.length > 512, 'amostra AVIF real supera o limite mínimo de bytes');
+
+  let requestOptions;
+  const result = await prepararImagemAmazon(amazonUrl, async (_url, options) => {
+    requestOptions = options;
+    return imageResponse(input, { contentType: 'image/avif' });
+  }, sharp);
+  const outputMetadata = await sharp(result.buffer).metadata();
+
+  assert.equal(requestOptions.headers.Accept, 'image/avif,image/jpeg;q=0.9');
+  assert.equal(result.sourceMime, 'image/avif');
+  assert.equal(result.sourceBytes, input.length);
+  assert.equal(result.mimetype, 'image/jpeg');
+  assert.equal(outputMetadata.mediaType, 'image/jpeg');
+  assert.equal(outputMetadata.format, 'jpeg');
+  assert.equal(outputMetadata.width, inputMetadata.width);
+  assert.equal(outputMetadata.height, inputMetadata.height);
+  assert.equal(result.width, inputMetadata.width);
+  assert.equal(result.height, inputMetadata.height);
+  assert.equal(result.bytes, result.buffer.length);
+  assert.notEqual(Buffer.compare(result.buffer, input), 0);
 });
 
 test('Amazon rejeita download incompleto, MIME incorreto e resolução de miniatura', async () => {
@@ -182,6 +226,26 @@ test('/send passes original buffer and caption together and marks recipient down
   assert.ok(Buffer.isBuffer(fixture.sent[0].payload.image));
   assert.equal(fixture.sent[0].payload.mimetype, 'image/jpeg');
   assert.equal(Buffer.compare(fixture.sent[0].payload.image, input), 0);
+});
+
+test('/send converts AVIF response from a .jpg URL and sends one JPEG buffer with the caption', async () => {
+  const input = await createAvifSample();
+  const fixture = await serverFixture({
+    fetchImage: async () => imageResponse(input, { contentType: 'image/avif' })
+  });
+  const result = await fixture.request('/send', {
+    marketplace: 'amazon', destino: '123@g.us', tipo: 'grupo', mensagem: 'Oferta Amazon', imagem: amazonUrl
+  });
+  const sent = fixture.sent[0];
+  const outputMetadata = await sharp(sent.payload.image).metadata();
+
+  assert.equal(result.code, 200);
+  assert.equal(result.json.imagemEnviada, true);
+  assert.equal(fixture.sent.length, 1);
+  assert.equal(sent.payload.caption, 'Oferta Amazon');
+  assert.ok(Buffer.isBuffer(sent.payload.image));
+  assert.equal(sent.payload.mimetype, 'image/jpeg');
+  assert.equal(outputMetadata.mediaType, 'image/jpeg');
 });
 
 test('/send distinguishes text fallback on download and media-send failures', async () => {
