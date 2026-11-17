@@ -435,11 +435,27 @@ test('metadado corrompido falha fechado sem selecionar outra sessão', async () 
 });
 
 test('rotas originais e implementações das integrações permanecem preservadas', () => {
-  const original = execFileSync('git', ['show', '492cfd7a23622c91abe16dddee9a3ed55e2634ff:server.js'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' });
+  const original = execFileSync('git', ['show', '0f05c0b:server.js'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' });
   const routes = s => [...s.matchAll(/caminho\s*===\s*"([^"]+)"/g)].map(m => m[1]);
-  assert.deepEqual(routes(source).filter(p => p !== '/pair'), routes(original));
-  const integrations = s => s.slice(s.indexOf('// MERCADO LIVRE - PKCE'), s.indexOf('// PROCESSAR DISPARADOR'));
-  assert.equal(integrations(source), integrations(original));
-  const packageJson = readFileSync(new URL('../package.json', import.meta.url), 'utf8');
-  assert.equal(packageJson.replace(/\r\n/g, '\n'), execFileSync('git', ['show', 'HEAD:package.json'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' }));
+  assert.deepEqual(routes(source).filter(p => p !== '/pair'), routes(original).filter(p => p !== '/pair'));
+  const segment = (s, startMarker, endMarker) => {
+    const normalized = s.replace(/\r\n/g, '\n');
+    return normalized.slice(normalized.indexOf(startMarker), normalized.indexOf(endMarker));
+  };
+  assert.equal(segment(source, '// MERCADO LIVRE - PKCE', '// ENVIAR OFERTA'),
+    segment(original, '// MERCADO LIVRE - PKCE', '// ENVIAR OFERTA'));
+  assert.equal(segment(source, 'async function processarDisparadorAutomatico()', '// INICIAR WHATSAPP'),
+    segment(original, 'async function processarDisparadorAutomatico()', '// INICIAR WHATSAPP'));
+  const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
+  const originalPackage = JSON.parse(execFileSync('git', ['show', '0f05c0b:package.json'], { cwd: new URL('..', import.meta.url), encoding: 'utf8' }));
+  assert.equal(packageJson.scripts.start, originalPackage.scripts.start);
+  const {
+    sharp: sharpVersion,
+    '@whiskeysockets/baileys': baileysVersion,
+    ...otherDependencies
+  } = packageJson.dependencies;
+  const { '@whiskeysockets/baileys': _originalBaileysVersion, ...originalOtherDependencies } = originalPackage.dependencies;
+  assert.deepEqual(otherDependencies, originalOtherDependencies);
+  assert.equal(baileysVersion, '6.7.24');
+  assert.equal(sharpVersion, '0.35.5');
 });

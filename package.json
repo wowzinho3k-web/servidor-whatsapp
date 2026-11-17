@@ -4,16 +4,18 @@
   "type": "module",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "test": "node --test test/*.test.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.9.0"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "latest",
-    "qrcode": "latest",
+    "@sparticuz/chromium": "153.0.0",
+    "@whiskeysockets/baileys": "6.7.24",
     "pino": "latest",
     "puppeteer-core": "25.11.0",
-    "@sparticuz/chromium": "153.0.0"
+    "qrcode": "latest",
+    "sharp": "0.35.5"
   }
 }

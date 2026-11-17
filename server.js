@@ -8,6 +8,7 @@ import makeWASocket, {
   Browsers
 } from "@whiskeysockets/baileys";
 
+import { amazonImageErrorCode, amazonImageFailureStage, prepararImagemAmazon } from "./amazon-image.js";
 import pino from "pino";
 
 
@@ -2938,41 +2939,71 @@ async function enviarOfertaWhatsApp(
     );
 
 
-  const imagem =
+  const imagemOriginal =
     String(
       oferta?.imagem ||
       ""
     ).trim();
+
+  let imagem = imagemOriginal;
+  let midiaAmazon = null;
+  const ofertaAmazon = String(oferta?.marketplace || oferta?.plataforma || "").trim().toLowerCase() === "amazon";
+  if (imagemOriginal && ofertaAmazon) {
+    try {
+      midiaAmazon = await prepararImagemAmazon(imagemOriginal);
+      imagem = midiaAmazon.buffer;
+      console.info("Imagem Amazon baixada e decodificada; bytes originais preservados.", {
+        bytes: midiaAmazon.bytes,
+        width: midiaAmazon.width,
+        height: midiaAmazon.height,
+        sha256Prefix: midiaAmazon.sha256.slice(0, 16)
+      });
+    } catch (erro) {
+      console.warn(`Falha na etapa ${amazonImageFailureStage(erro)} da imagem Amazon; a oferta seguirá sem imagem.`, amazonImageErrorCode(erro));
+      imagem = null;
+    }
+  }
 
 
   if (imagem) {
 
     try {
 
-      return await sock.sendMessage(
+      const resultadoEnvio = await sock.sendMessage(
         jid,
         {
 
-          image: {
-            url:
-              imagem
-          },
+          image:
+            Buffer.isBuffer(imagem) ? imagem : { url: imagem },
+
+          ...(midiaAmazon ? { mimetype: midiaAmazon.mimetype } : {}),
 
           caption:
             mensagem
         }
       );
+      if (ofertaAmazon && midiaAmazon) {
+        console.info("Baileys aceitou o envio da mídia Amazon; download pelo destinatário não confirmado.", {
+          bytes: midiaAmazon.bytes,
+          sha256Prefix: midiaAmazon.sha256.slice(0, 16)
+        });
+      }
+      return resultadoEnvio;
     }
 
     catch (
       erroImagem
     ) {
 
-      console.error(
-        "Falha ao enviar imagem. Tentando texto:",
-        erroImagem?.message ||
-        erroImagem
-      );
+      if (ofertaAmazon) {
+        console.warn("Falha na etapa sendMessage da imagem Amazon; a oferta seguirá como texto.", amazonImageErrorCode(erroImagem));
+      } else {
+        console.error(
+          "Falha ao enviar imagem. Tentando texto:",
+          erroImagem?.message ||
+          erroImagem
+        );
+      }
     }
   }
 
@@ -4977,12 +5008,34 @@ const server =
             );
 
 
-          const imagem =
+          const imagemOriginal =
             String(
               body.imagem ||
               ""
             ).trim();
 
+          let imagem = imagemOriginal;
+          let midiaAmazon = null;
+          const ofertaAmazon = String(body.marketplace || body.plataforma || "").trim().toLowerCase() === "amazon";
+          let imagemEnviada = false;
+          let fallbackTexto = false;
+
+          if (imagemOriginal && ofertaAmazon) {
+            try {
+              midiaAmazon = await prepararImagemAmazon(imagemOriginal);
+              imagem = midiaAmazon.buffer;
+              console.info("Imagem Amazon baixada e decodificada para /send; bytes originais preservados.", {
+                bytes: midiaAmazon.bytes,
+                width: midiaAmazon.width,
+                height: midiaAmazon.height,
+                sha256Prefix: midiaAmazon.sha256.slice(0, 16)
+              });
+            } catch (erro) {
+              console.warn(`Falha na etapa ${amazonImageFailureStage(erro)} da imagem Amazon em /send; o teste seguirá sem imagem.`, amazonImageErrorCode(erro));
+              imagem = null;
+              fallbackTexto = true;
+            }
+          }
 
           let resultado;
 
@@ -4996,10 +5049,10 @@ const server =
                   jid,
                   {
 
-                    image: {
-                      url:
-                        imagem
-                    },
+                    image:
+                      Buffer.isBuffer(imagem) ? imagem : { url: imagem },
+
+                    ...(midiaAmazon ? { mimetype: midiaAmazon.mimetype } : {}),
 
                     caption:
                       String(
@@ -5007,17 +5060,29 @@ const server =
                       )
                   }
                 );
+              imagemEnviada = true;
+              if (ofertaAmazon && midiaAmazon) {
+                console.info("Baileys aceitou o envio da mídia Amazon em /send; download pelo destinatário não confirmado.", {
+                  bytes: midiaAmazon.bytes,
+                  sha256Prefix: midiaAmazon.sha256.slice(0, 16)
+                });
+              }
             }
 
             catch (
               erroImagem
             ) {
 
-              console.error(
-                "Falha ao enviar imagem na rota /send. Tentando texto:",
-                erroImagem?.message ||
-                erroImagem
-              );
+              fallbackTexto = true;
+              if (ofertaAmazon) {
+                console.warn("Falha na etapa sendMessage da imagem Amazon em /send; usando texto.", amazonImageErrorCode(erroImagem));
+              } else {
+                console.error(
+                  "Falha ao enviar imagem na rota /send. Tentando texto:",
+                  erroImagem?.message ||
+                  erroImagem
+                );
+              }
 
 
               resultado =
@@ -5057,6 +5122,30 @@ const server =
 
               sucesso:
                 true,
+
+              imagemEnviada,
+
+              midiaAceitaPeloBaileys:
+                imagemEnviada,
+
+              downloadDestinatarioConfirmado:
+                null,
+
+              fallbackTexto,
+
+              tipoEnvio:
+                imagemEnviada
+                  ? "imagem"
+                  : fallbackTexto
+                    ? "texto_fallback"
+                    : "texto",
+
+              statusMidia:
+                imagemEnviada
+                  ? "aceita_pelo_baileys_download_nao_confirmado"
+                  : fallbackTexto
+                    ? "falha_ou_download_rejeitado_fallback_textual"
+                    : "sem_midia",
 
               id:
                 resultado

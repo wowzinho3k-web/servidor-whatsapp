@@ -1,0 +1,20 @@
+# Installed dependencies and generated packages
+node_modules/
+
+# Local backups and persistent data
+backup*/
+data/
+baileys-auth*/
+auth_info*/
+
+# Local credentials and secrets
+.env
+.env.*
+!.env.example
+credentials/
+credentials*.json
+secrets/
+*.pem
+*.key
+*.p12
+*.pfx
